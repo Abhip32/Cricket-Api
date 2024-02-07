@@ -111,7 +111,7 @@ const scoreCardController = {
 
                 });
 
-                res.send(mainData)
+                res.status(200).send(mainData)
 
             } else if (scorecard == "commentary") {
               let headings=[];
@@ -158,7 +158,7 @@ const scoreCardController = {
                 comm=[]
               });
               
-              res.send({numericData,Innings});
+              res.status(200).send({numericData,Innings});
               
             }
             else if(scorecard == 'players')
@@ -180,7 +180,7 @@ const scoreCardController = {
               teamB.push({ name: playerName});
             });
             
-            res.send({teamA: teamA, teamB: teamB})
+            res.status(200).send({teamA: teamA, teamB: teamB})
             }
             
 

@@ -90,7 +90,7 @@ const rankingsController = {
           return { index, country, ratings };
         }).get();
     
-        res.send(arr4);
+        res.status(200).send(arr4);
       } catch (error) {
         console.error('Error fetching cricket data:', error);
         return []; // Return an empty array or handle the error as needed.

@@ -21,7 +21,7 @@ const featuresController ={
             });
         });
 
-        res.send(data);
+        res.status(200).send(data);
       } catch (error) {
         console.log(error);
         return [];
@@ -58,7 +58,7 @@ const featuresController ={
             moreNews.push({ title, Image, link });
         });
         
-        res.send({ mainNews, moreNews });
+        res.status(200).send({ mainNews, moreNews });
     } catch (error) {
         console.log(error);
         return { mainNews: [], moreNews: [] };
@@ -90,7 +90,7 @@ const featuresController ={
                   
                     moreNews.push({ title, Image,link });
                   });
-                res.send({mainNews:mainNews,moreNews:moreNews});
+                res.status(200).send({mainNews:mainNews,moreNews:moreNews});
           
               } catch (error) {
                 console.log(error);
@@ -116,7 +116,7 @@ const featuresController ={
                   });
                 });
             
-                res.send({playerOfTheWeek});
+                res.status(200).send({playerOfTheWeek});
               } catch (error) {
                 console.log(error);
               }

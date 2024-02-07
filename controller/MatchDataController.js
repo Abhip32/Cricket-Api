@@ -50,7 +50,7 @@ const MatchDataController = {
       });    
 
 
-res.send(matchDetails);
+res.status(200).send(matchDetails);
 
     } catch (error) {
       console.log(error);
@@ -101,7 +101,7 @@ res.send(matchDetails);
         matchDetails.push(match);
       });
 
-        res.send(matchDetails);
+        res.status(200).send(matchDetails);
       
     } catch (error) {
       console.log(error);
@@ -152,7 +152,7 @@ res.send(matchDetails);
         matchDetails.push(match);
       });
       
-      res.send(matchDetails);
+      res.status(200).send(matchDetails);
     } catch (error) {
       console.log(error);
     }
