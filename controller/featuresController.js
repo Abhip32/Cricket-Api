@@ -103,8 +103,8 @@ const featuresController ={
                 const html = response.data;
                 const $ = cheerio.load(html);
                 const playerOfTheWeek = [];
-
-                $('.col.link.img-top').slice(0, 2).each((index, element) => {
+              
+                $('.col-md-9').find('.col.link.img-top').each((index, element) => {
                   const title = $(element).find('h2 a').text().trim();
                   const imageSrc = "https:"+$(element).find('img').attr('data-src');
                   const description = $(element).find('p').text().trim();
