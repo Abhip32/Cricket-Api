@@ -11,6 +11,20 @@ const scoreCardController = {
             const type=req.params.type;
             const match=req.params.match;
             const matchData={};
+            const batting1A=[];
+            const bowling1B=[];
+            const batting2A=[];
+            const bowling2B=[];
+
+            const batting3A=[];
+            const bowling3B=[];
+            const batting4A=[];
+            const bowling4B=[];
+
+            const fow1A=[];
+            const fow1B=[];
+            const fow2A=[];
+            const fow2B=[];
             const tablesData=[];
             url="https://www.cricketlineguru.com/"+init+"/"+id+"/"+type+"/"+match;
             const response = await axios.get(url);
@@ -30,8 +44,58 @@ const scoreCardController = {
                 $('.mat-expansion-panel-header-title').each(function(index, element) {
                     headings.push($(element).text());
                 });
-    
-                matchData.tables=tablesData;
+                
+                for (let i = 0; i < tablesData[0]?.length; i += 6) {
+                    const row = tablesData[0].slice(i, i + 6);
+                    batting1A.push(row);
+                }
+
+                for (let i = 0; i < tablesData[1]?.length; i += 6) {
+                    const row = tablesData[1].slice(i, i + 6);
+                    bowling1B.push(row);
+                }
+
+                for (let i = 0; i < tablesData[3]?.length; i += 6) {
+                    const row = tablesData[3].slice(i, i + 6);
+                    batting2A.push(row);
+                }
+
+                for (let i = 0; i < tablesData[4]?.length; i += 6) {
+                    const row = tablesData[4].slice(i, i + 6);
+                    bowling2B.push(row);
+                }
+
+                for (let i = 0; i < tablesData[6]?.length; i += 6) {
+                    const row = tablesData[3].slice(i, i + 6);
+                    batting3A.push(row);
+                }
+
+                for (let i = 0; i < tablesData[7]?.length; i += 6) {
+                    const row = tablesData[4].slice(i, i + 6);
+                    bowling3B.push(row);
+                }
+
+                for (let i = 0; i < tablesData[9]?.length; i += 6) {
+                    const row = tablesData[3].slice(i, i + 6);
+                    batting4A.push(row);
+                }
+
+                for (let i = 0; i < tablesData[10]?.length; i += 6) {
+                    const row = tablesData[4].slice(i, i + 6);
+                    bowling4B.push(row);
+                }
+                matchData.batting1A=batting1A;
+                matchData.bowling1B=bowling1B;
+
+                matchData.batting2A=batting2A;
+                matchData.bowling2B=bowling2B;
+
+                matchData.batting3A=batting3A;
+                matchData.bowling3B=bowling3B;
+
+                matchData.batting4A=batting4A;
+                matchData.bowling4B=bowling4B;
+
                 matchData.headings=headings;
                 res.status(200).send(matchData)
             }
