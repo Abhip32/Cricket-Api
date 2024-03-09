@@ -74,10 +74,10 @@ $('tr.ng-star-inserted').each((index, row) => {
             const $current = $element.find('.current');
             
             const match = {
-                linkCommentary: 'https://www.cricketlineguru.com' + $match.find('a').attr('href'),
-                linkScoreCard: 'https://www.cricketlineguru.com' + $match.find('a').attr('href')?.replace('commentary', 'match-scorecard'),
-                linkInfo: 'https://www.cricketlineguru.com' + $match.find('a').attr('href')?.replace('commentary', 'info'),
-                linkSquad: 'https://www.cricketlineguru.com' + $match.find('a').attr('href')?.replace('commentary', 'squad'),
+                linkCommentary:  $match.find('a').attr('href'),
+                linkScoreCard:  $match.find('a').attr('href')?.replace('commentary', 'match-scorecard'),
+                linkInfo:  $match.find('a').attr('href')?.replace('commentary', 'info'),
+                linkSquad:  $match.find('a').attr('href')?.replace('commentary', 'squad'),
                 title: $match.find('a').first().text(),
                 details: $match.find('.match span').last().text(),
                 teamA: $current.first().find('.name').text(),
@@ -124,10 +124,10 @@ $('tr.ng-star-inserted').each((index, row) => {
             const $current = $element.find('.current');
             
             const match = {
-                linkCommentary: 'https://www.cricketlineguru.com' + $match.find('a').attr('href'),
-                linkScoreCard: 'https://www.cricketlineguru.com' + $match.find('a').attr('href')?.replace('commentary', 'match-scorecard'),
-                linkInfo: 'https://www.cricketlineguru.com' + $match.find('a').attr('href')?.replace('commentary', 'info'),
-                linkSquad: 'https://www.cricketlineguru.com' + $match.find('a').attr('href')?.replace('commentary', 'squad'),
+                linkCommentary:  $match.find('a').attr('href'),
+                linkScoreCard:  $match.find('a').attr('href')?.replace('commentary', 'match-scorecard'),
+                linkInfo:  $match.find('a').attr('href')?.replace('commentary', 'info'),
+                linkSquad:  $match.find('a').attr('href')?.replace('commentary', 'squad'),
                 title: $match.find('a').first().text(),
                 details: $match.find('.match span').last().text(),
                 teamA: $current.first().find('.name').text(),
