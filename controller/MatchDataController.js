@@ -90,7 +90,7 @@ $('tr.ng-star-inserted').each((index, row) => {
                 date:date
             };
             
-            if(match.linkCommentary !== 'https://www.cricketlineguru.comundefined' && match.title!==''&&match.details!=='')
+            if(match.linkCommentary !== 'https://www.cricketlineguru.comundefined' && match.title!=='')
             {
               matchDetails.push(match);
             }
@@ -140,7 +140,7 @@ $('tr.ng-star-inserted').each((index, row) => {
                 date:date
             };
             
-            if(match.linkCommentary !== 'https://www.cricketlineguru.comundefined'&& match.title!==''&&match.details!=='')
+            if(match.linkCommentary !== 'https://www.cricketlineguru.comundefined'&& match.title!=='')
             {
               matchDetails.push(match);
             }
