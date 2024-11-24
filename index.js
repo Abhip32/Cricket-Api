@@ -7,7 +7,7 @@ const app = express();
 app.use(cors());
 
 app.get('/',(req,res)=>{
-    res.json("Cricket API Made by Abhip32")
+    res.json("Cricket API Made by Abhip32!")
 })
 
 
