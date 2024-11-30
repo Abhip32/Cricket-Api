@@ -1,6 +1,6 @@
 const router = require('express').Router()
 const scoreCardController=require('../controller/scoreCardController');
 
-router.get('/getScorecard/:init/:id/:type/:match',scoreCardController.getScoreCard)
+router.get('/getScorecard',scoreCardController.getScoreCard)
 
 module.exports = router

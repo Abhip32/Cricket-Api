@@ -1,18 +1,67 @@
 const axios = require('axios');
 const cheerio = require('cheerio');
 const puppeteer = require('puppeteer');
-
+const { getBrowser } = require('../utils/browserManager');
+const { autoScroll } = require('../utils/scrollHelper');
 
 
 const newsController = {
   getNews: async (req, res) => {
     try {
-      const newsItems = await fetchNewsData('https://www.cricbuzz.com/cricket-news/latest-news')
-  
-      const top5News = newsItems.slice(0, 5);
-      res.status(200).json(top5News);
+      const browser = await getBrowser();
+      const page = await browser.newPage();
+
+      // Block unnecessary resources except images and scripts
+      await page.setRequestInterception(true);
+      page.on('request', (req) => {
+        const resourceType = req.resourceType();
+        if (resourceType === 'stylesheet' || resourceType === 'font' || resourceType === 'media') {
+          req.abort();
+        } else {
+          req.continue();
+        }
+      });
+
+      // Set viewport and user agent
+      await page.setViewport({ width: 1280, height: 800 });
+      await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36');
+
+      await page.goto('https://www.espncricinfo.com/cricket-news', {
+        waitUntil: 'networkidle2',
+        timeout: 0
+      });
+
+      // Scroll to load all content
+      await autoScroll(page);
+      await page.waitForSelector('img[src*="hscicdn"]', { timeout: 5000 }).catch(() => { });
+      // Get page content after scrolling
+      const content = await page.content();
+      const $ = cheerio.load(content);
+
+      const newsItems = [];
+      $('.ds-border-b.ds-border-line').each((i, element) => {
+        const headline = $(element).find('.ds-text-title-s').text().trim();
+        const link = $(element).find('a').attr('href');
+        
+        const image = $(element).find('img').attr('src')?.replace('f_auto,t_ds_square_w_160,q_50/', '');
+        
+        const timeElement = $(element).find('.ds-text-compact-xs').first().text().trim();
+        const authorElement = $(element).find('.ds-text-compact-xs').last().text().trim();
+        const timeAndAuthor = `${timeElement} • ${authorElement}`;
+
+        newsItems.push({
+          headline,
+          link,
+          image,
+          timeAndAuthor
+        });
+      });
+
+      await browser.close();
+      res.status(200).json(newsItems);
     } catch (error) {
       console.log(error);
+      res.status(500).json({ error: 'Failed to fetch news' });
     }
   },
   
