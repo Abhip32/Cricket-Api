@@ -45,27 +45,49 @@ const scoreCardController = {
             };
 
             // Extract playing XI data
-            $playingXI('.ds-rounded-xl').first().find('.ds-w-full.ds-table').each((index, table) => {
-                const teamHeader = $playingXI(table).find('thead th').eq(1).text().trim();
-                const currentTeam = index === 0 ? 'team1' : 'team2';
-                
-                matchData.playingXI[currentTeam].name = teamHeader;
-                
-                $playingXI(table).find('tbody tr').each((_, tr) => {
-                    const playerName = $playingXI(tr).find('td').eq(1).find('a').text().trim();
-                    const playerRole = $playingXI(tr).find('td').eq(1).find('p').text().trim();
-                    const isWicketkeeper = playerName.includes('†');
-                    const isCaptain = playerName.includes('(c)');
+            $playingXI('.ds-rounded-xl table.ds-w-full').each((index, table) => {
+                const teamHeader1 = $playingXI(table).find('thead th').eq(1).text().trim();
+                const teamHeader2 = $playingXI(table).find('thead th').eq(2).text().trim();
+
+                // Set team names
+                matchData.playingXI.team1.name = teamHeader1;
+                matchData.playingXI.team2.name = teamHeader2;
+
+                $playingXI(table).find('tbody tr').each((ind, tr) => {
+                    // Skip bench players and empty rows
+                    const playerCell1 = $playingXI(tr).find('td').eq(1);
+                    const playerCell2 = $playingXI(tr).find('td').eq(2);
                     
-                    if (playerName) {
+                    const playerName1 = playerCell1.find('a').text().trim();
+                    const playerRole1 = playerCell1.find('p').text().trim();
+                    const isWicketkeeper1 = playerName1.includes('†');
+                    const isCaptain1 = playerName1.includes('(c)');
+                    
+                    if (playerName1) {
                         const player = {
-                            name: playerName.replace('†', '').replace('(c)', '').trim(),
-                            role: playerRole || '',
-                            isWicketkeeper: isWicketkeeper,
-                            isCaptain: isCaptain
+                            name: playerName1.replace('†', '').replace('(c)', '').trim(),
+                            role: playerRole1 || '',
+                            isWicketkeeper: isWicketkeeper1,
+                            isCaptain: isCaptain1
                         };
                         
-                        matchData.playingXI[currentTeam].players.push(player);
+                        matchData.playingXI.team1.players.push(player);
+                    }
+                    
+                    const playerName2 = playerCell2.find('a').text().trim();
+                    const playerRole2 = playerCell2.find('p').text().trim();
+                    const isWicketkeeper2 = playerName2.includes('†');
+                    const isCaptain2 = playerName2.includes('(c)');
+                    
+                    if (playerName2) {
+                        const player = {
+                            name: playerName2.replace('†', '').replace('(c)', '').trim(),
+                            role: playerRole2 || '',
+                            isWicketkeeper: isWicketkeeper2,
+                            isCaptain: isCaptain2
+                        };
+                        
+                        matchData.playingXI.team2.players.push(player);
                     }
                 });
             });
