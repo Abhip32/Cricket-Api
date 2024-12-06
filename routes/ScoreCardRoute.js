@@ -1,6 +1,11 @@
-const router = require('express').Router()
-const scoreCardController=require('../controller/scoreCardController');
+const express = require('express');
+const router = express.Router();
+const scoreCardController = require('../controller/scoreCardController');
 
-router.get('/getScorecard/:init/:id/:type/:match',scoreCardController.getScoreCard)
+router.get('/getScorecard', scoreCardController.getScoreCard);
+router.get('/getSquads', scoreCardController.getSquads);
+router.get('/getCommentary', scoreCardController.getCommentary);
+router.get('/getMatchNews', scoreCardController.getNews);
+router.get('/getMiniScorecard', scoreCardController.getMiniScorecard);
 
-module.exports = router
+module.exports = router; 

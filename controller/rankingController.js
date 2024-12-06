@@ -1,5 +1,10 @@
 const axios = require('axios');
 const cheerio = require('cheerio');
+const fs = require('fs');
+const path = require('path');
+
+const teamFlagsPath = path.join('./team_flags.json');
+const teamFlags = JSON.parse(fs.readFileSync(teamFlagsPath, 'utf8'));
 
 const fetchRankingsData = async (url) => {
   try {
@@ -70,31 +75,39 @@ const rankingsController = {
 
   getTeamsRankings: async (req, res) => {
     try {
-        const response = await axios.get('https://www.cricbuzz.com/cricket-stats/icc-rankings/men/teams');
-        const html = response.data;
-        const $ = cheerio.load(html);
-    
-        const arr4 = $('.cb-col.cb-col-100.cb-font-14.cb-brdr-thin-btm.text-center', html).map(function () {
-          const index = $(this).find('.cb-col.cb-col-20.cb-lst-itm-sm').map(function () {
-            return $(this).text().trim();
-          }).get();
-    
-          const country = $(this).find('.cb-col.cb-col-50.cb-lst-itm-sm.text-left').map(function () {
-            return $(this).text().trim();
-          }).get();
-    
-          const ratings = $(this).find('.cb-col.cb-col-14').map(function () {
-            return $(this).text().trim();
-          }).get();
-    
-          return { index, country, ratings };
+      const response = await axios.get('https://www.cricbuzz.com/cricket-stats/icc-rankings/men/teams');
+      const html = response.data;
+      const $ = cheerio.load(html);
+
+      const arr4 = $('.cb-col.cb-col-100.cb-font-14.cb-brdr-thin-btm.text-center', html).map(function () {
+        const index = $(this).find('.cb-col.cb-col-20.cb-lst-itm-sm').map(function () {
+          return $(this).text().trim();
         }).get();
-    
-        res.status(200).send(arr4);
-      } catch (error) {
-        console.error('Error fetching cricket data:', error);
-        return []; // Return an empty array or handle the error as needed.
-      }
+
+        const countryName = $(this).find('.cb-col.cb-col-50.cb-lst-itm-sm.text-left').map(function () {
+          return $(this).text().trim().toLowerCase();
+        }).get();
+
+        const ratings = $(this).find('.cb-col.cb-col-14').map(function () {
+          return $(this).text().trim();
+        }).get();
+
+        const formattedCountryName = countryName[0].toLowerCase().split(' ').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
+        const flag = teamFlags[formattedCountryName] || teamFlags['Default'];
+
+        return { 
+          index, 
+          country: countryName, 
+          ratings,
+          flag
+        };
+      }).get();
+
+      res.status(200).send(arr4);
+    } catch (error) {
+      console.error('Error fetching cricket data:', error);
+      return []; // Return an empty array or handle the error as needed.
+    }
   }
 };
 

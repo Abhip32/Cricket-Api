@@ -1,159 +1,278 @@
 const axios = require('axios');
 const cheerio = require('cheerio');
-
+const fs = require('fs');
+const path = require('path');
 
 
 const MatchDataController = {
+
+  
   getLiveMatches: async (req, res) => {
     try {
-      const response = await axios.get('https://www.cricketlineguru.com/live-scores');
+      const response = await axios.get('https://www.cricbuzz.com/cricket-match/live-scores');
       const html = response.data;
       const $ = cheerio.load(html);
   
-      const matches = $('.card.ng-star-inserted');
+      // Load team flags from JSON file
+      const teamFlagsPath = path.join('./team_flags.json');
+      const teamFlags = JSON.parse(fs.readFileSync(teamFlagsPath, 'utf8'));
+  
       const matchDetails = [];
   
-      matches.each((index, element) => {
+      $('.cb-mtch-lst').each((index, element) => {
         const match = {};
-  
-        const status = $(element).find('.text-right').text().trim();
-        const description = $(element).find('.top-left').text();
-        const link=$(element).find('.top-left').find('a').attr('href');
-        const time= $(element).find('.time_top').text().trim();
-        const teamA = $(element).find('.team_name').first().text();
-        const flagA = $(element).find('.user-img').first().attr('src');
-        const flagB = $(element).find('.user-img').last().attr('src');
-        const teamB = $(element).find('.team_name').last().text();
-        const scoreA = $(element).find('.full-content').first().text().trim();
-        const scoreB = $(element).find('.full-content').last().text().trim();
-        const result =$(element).find('.bot-message').text().trim();
-
-        match.status = status === ''? result:status;
-        match.description = description;
-        match.overview = 'https://www.cricketlineguru.com'+link;
-        match.fixtures = 'https://www.cricketlineguru.com'+link.replace('overview','fixtures');
-        match.news = 'https://www.cricketlineguru.com'+link.replace('overview','news');
-        match.videos = 'https://www.cricketlineguru.com'+link.replace('overview','videos');
-        match.news = 'https://www.cricketlineguru.com'+link.replace('overview','news');
-        match.venues='https://www.cricketlineguru.com'+link.replace('overview','venues');
-        match.time=time;
-        match.teamA = teamA;
-        match.teamB = teamB;
-        match.flagA = flagA;
-        match.flagB = flagB;
-        match.scoreA=scoreA;
-        match.scoreB = scoreB;
         
+        // Get match header info
+        const header = $(element).find('.cb-col-100.cb-col.cb-schdl.cb-billing-plans-text');
+        match.title = header.find('.text-hvr-underline').text().trim();
+        match.series = header.closest('.cb-col.cb-col-100.cb-plyr-tbody').find('.cb-lv-grn-strip a').text().trim();
+        
+        // Extract match info and time
+        const matchInfo = header.find('.text-gray').text().trim();
+        const timeMatch = matchInfo.match(/(\d{1,2}:\d{2} [APM]{2})/);
+        match.matchInfo = matchInfo;
+        match.time = timeMatch ? timeMatch[0] : '';
+  
+        // Extract team names from title
+        const teams = match.title.split(' vs ');
+        const teamAName = teams[0].trim();
+        const teamBName = teams[1]?.replace(',', '').trim();
+  
+        // Get match scores
+        const scoreBlock = $(element).find('.cb-scr-wll-chvrn');
+        const batTexts = scoreBlock.find('.cb-hmscg-bat-txt');
+        const bwlText = scoreBlock.find('.cb-hmscg-bwl-txt');
+        
+        // Handle both cases: two bat-txt elements or bat-txt + bwl-txt
+        if (batTexts.length === 2) {
+          // Case 1: Both teams are in bat-txt
+          match.teamA = $(batTexts[0]).find('.cb-hmscg-tm-nm').text().trim();
+          match.teamB = $(batTexts[1]).find('.cb-hmscg-tm-nm').text().trim();
+          match.scoreA = $(batTexts[0]).find('.cb-ovr-flo').eq(1).text().trim();
+          match.scoreB = $(batTexts[1]).find('.cb-ovr-flo').eq(1).text().trim();
+        } else {
 
-        matchDetails.push(match);
-
+          const firstElement = batTexts.length > 0 && bwlText.length > 0 
+          ? (batTexts[0].startIndex < bwlText[0].startIndex ? batTexts : bwlText)
+          : (batTexts.length > 0 ? batTexts : bwlText);
+        
+        const secondElement = firstElement === batTexts ? bwlText : batTexts;
+          // Case 2: Teams split between bat-txt and bwl-txt
+          match.teamA = firstElement.find('.cb-hmscg-tm-nm').text().trim();
+          match.teamB = secondElement.find('.cb-hmscg-tm-nm').text().trim();
+          match.scoreA = firstElement.find('.cb-ovr-flo').eq(1).text().trim();
+          match.scoreB = secondElement.find('.cb-ovr-flo').eq(1).text().trim();
+        }
+        
+        // Get match status/result
+        match.status = scoreBlock.find('.cb-text-live').text() || 
+                       scoreBlock.find('.cb-text-complete').text() ||
+                       scoreBlock.find('.cb-text-preview').text()||
+                       $(element).find('.cb-lv-scrs-well.cb-lv-scrs-well-preview').text().trim();
+  
+        // Add flags to match details using full team names
+        match.flagA = teamFlags[teamAName] || teamFlags["Default"];;
+        match.flagB = teamFlags[teamBName] || teamFlags["Default"];;
+  
+        // Get match links
+        const links = $(element).find('nav a');
+        match.links = {};
+        links.each((i, link) => {
+          const text = $(link).text().toLowerCase()?.replace(/\s+/g, '');
+          const href = 'https://www.cricbuzz.com' + $(link).attr('href');
+          match.links[text] = href;
+        });
+  
+        if(match.title) { // Only add if match has a title
+          matchDetails.push(match);
+        }
       });
   
       res.status(200).send(matchDetails);
     } catch (error) {
-      console.log(error);
+      console.error('Error fetching live matches:', error);
+      res.status(500).send({ error: 'Failed to fetch live matches' });
     }
   },
 
 
   getRecentMatches : async (req, res) => {
     try {
-      const response = await axios.get('https://www.cricketlineguru.com/cricket-schedule/recent/all');
+      const response = await axios.get('https://www.cricbuzz.com/cricket-match/live-scores/recent-matches');
       const html = response.data;
       const $ = cheerio.load(html);
-
+  
+      // Load team flags from JSON file
+      const teamFlagsPath = path.join('./team_flags.json');
+      const teamFlags = JSON.parse(fs.readFileSync(teamFlagsPath, 'utf8'));
+  
       const matchDetails = [];
+  
+      $('.cb-mtch-lst').each((index, element) => {
+        const match = {};
+        
+        // Get match header info
+        const header = $(element).find('.cb-col-100.cb-col.cb-schdl.cb-billing-plans-text');
+        match.title = header.find('.text-hvr-underline').text().trim();
+        match.series = header.closest('.cb-col.cb-col-100.cb-plyr-tbody').find('.cb-lv-grn-strip a').text().trim();
+        
+        // Extract match info and time
+        const matchInfo = header.find('.text-gray').text().trim();
+        const timeMatch = matchInfo.match(/(\d{1,2}:\d{2} [APM]{2})/);
+        match.matchInfo = matchInfo;
+        match.time = timeMatch ? timeMatch[0] : '';
 
-$('tr.ng-star-inserted').each((index, row) => {
-  const date=$(row).find('.purple_text').text();
-    $(row).find('td.ng-star-inserted').each((index, cell) => {
-        $(cell).find('div.ng-star-inserted').each((index, div) => { // Changed variable name from cell to div
-            const $element = $(div); // Changed variable name from cell to div
-            
-            const $match = $element.find('.match');
-            const $current = $element.find('.current');
-            
-            const match = {
-                linkCommentary:  $match.find('a').attr('href'),
-                linkScoreCard:  $match.find('a').attr('href')?.replace('commentary', 'match-scorecard'),
-                linkInfo:  $match.find('a').attr('href')?.replace('commentary', 'info'),
-                linkSquad:  $match.find('a').attr('href')?.replace('commentary', 'squad'),
-                title: $match.find('a').first().text(),
-                details: $match.find('.match span').last().text(),
-                teamA: $current.first().find('.name').text(),
-                scoreA: $current.first().find('.score').text(),
-                flagA: $current.first().find('img').attr('src'),
-                info: $element.find('p.info').first().text(), // Changed $element instead of $element.find
-                teamB: $current.first().next().find('.name').text(),
-                scoreB: $current.first().next().find('.score').text(),
-                flagB: $current.first().next().find('img').attr('src'),
-                date:date
-            };
-            
-            if(match.linkCommentary !== 'https://www.cricketlineguru.comundefined' && match.title!=='')
-            {
-              matchDetails.push(match);
-            }
+        // Extract team names from title
+        const teams = match.title.split(' vs ');
+        const teamAName = teams[0].trim();
+        const teamBName = teams[1]?.replace(',', '').trim();
+  
+        // Get match scores
+        const scoreBlock = $(element).find('.cb-scr-wll-chvrn');
+        const batTexts = scoreBlock.find('.cb-hmscg-bat-txt');
+        const bwlText = scoreBlock.find('.cb-hmscg-bwl-txt');
+        
+        // Handle both cases: two bat-txt elements or bat-txt + bwl-txt
+        if (batTexts.length === 2) {
+          // Case 1: Both teams are in bat-txt
+          match.teamA = $(batTexts[0]).find('.cb-hmscg-tm-nm').text().trim();
+          match.teamB = $(batTexts[1]).find('.cb-hmscg-tm-nm').text().trim();
+          match.scoreA = $(batTexts[0]).find('.cb-ovr-flo').eq(1).text().trim();
+          match.scoreB = $(batTexts[1]).find('.cb-ovr-flo').eq(1).text().trim();
+        } else {
+          // Case 2: Teams split between bat-txt and bwl-txt
+          const firstElement = batTexts.length > 0 && bwlText.length > 0 
+          ? (batTexts[0].startIndex < bwlText[0].startIndex ? batTexts : bwlText)
+          : (batTexts.length > 0 ? batTexts : bwlText);
+        
+        const secondElement = firstElement === batTexts ? bwlText : batTexts;
+          // Case 2: Teams split between bat-txt and bwl-txt
+          match.teamA = firstElement.find('.cb-hmscg-tm-nm').text().trim();
+          match.teamB = secondElement.find('.cb-hmscg-tm-nm').text().trim();
+          match.scoreA = firstElement.find('.cb-ovr-flo').eq(1).text().trim();
+          match.scoreB = secondElement.find('.cb-ovr-flo').eq(1).text().trim();
+        }
+        
+        // Get match status/result
+        match.status = scoreBlock.find('.cb-text-live').text() || 
+                       scoreBlock.find('.cb-text-complete').text() ||
+                       scoreBlock.find('.cb-text-preview').text();
+  
+        // Add flags to match details using full team names
+        match.flagA = teamFlags[teamAName] || teamFlags["Default"];;
+        match.flagB = teamFlags[teamBName] || teamFlags["Default"];;
+  
+        // Get match links
+        const links = $(element).find('nav a');
+        match.links = {};
+        links.each((i, link) => {
+          const text = $(link).text().toLowerCase()?.replace(/\s+/g, '');
+          const href = 'https://www.cricbuzz.com' + $(link).attr('href');
+          match.links[text] = href;
         });
-    });
-});
-
-        res.status(200).send(matchDetails);
-      
+  
+        if(match.title) { // Only add if match has a title
+          matchDetails.push(match);
+        }
+      });
+  
+      res.status(200).send(matchDetails);
     } catch (error) {
-      console.log(error);
+      console.error('Error fetching live matches:', error);
+      res.status(500).send({ error: 'Failed to fetch live matches' });
     }
+
     
   },
 
-  getUpcomingMatches:async (req,res)=>{
+  getUpcomingMatches : async (req, res) => {
     try {
-      const response = await axios.get('https://www.cricketlineguru.com/cricket-schedule/upcoming/all');
+      const response = await axios.get('https://www.cricbuzz.com/cricket-match/live-scores/upcoming-matches');
       const html = response.data;
       const $ = cheerio.load(html);
-
+  
+      // Load team flags from JSON file
+      const teamFlagsPath = path.join('./team_flags.json');
+      const teamFlags = JSON.parse(fs.readFileSync(teamFlagsPath, 'utf8'));
+  
       const matchDetails = [];
+  
+      $('.cb-mtch-lst').each((index, element) => {
+        const match = {};
+        
+        // Get match header info
+        const header = $(element).find('.cb-col-100.cb-col.cb-schdl.cb-billing-plans-text');
+        match.title = header.find('.text-hvr-underline').text().trim();
+        match.series = header.closest('.cb-col.cb-col-100.cb-plyr-tbody').find('.cb-lv-grn-strip a').text().trim();
+        
+        // Extract match info and time
+        const matchInfo = header.find('.text-gray').text().trim();
+        const timeMatch = matchInfo.match(/(\d{1,2}:\d{2} [APM]{2})/);
+        match.matchInfo = matchInfo;
+        match.time = timeMatch ? timeMatch[0] : '';
 
-$('tr.ng-star-inserted').each((index, row) => {
-  const date=$(row).find('.purple_text').text();
-    $(row).find('td.ng-star-inserted').each((index, cell) => {
-        $(cell).find('div.ng-star-inserted').each((index, div) => { // Changed variable name from cell to div
-            const $element = $(div); // Changed variable name from cell to div
-            
-            const $match = $element.find('.match');
-            const $current = $element.find('.current');
-            
-            const match = {
-                linkCommentary:  $match.find('a').attr('href'),
-                linkScoreCard:  $match.find('a').attr('href')?.replace('commentary', 'match-scorecard'),
-                linkInfo:  $match.find('a').attr('href')?.replace('commentary', 'info'),
-                linkSquad:  $match.find('a').attr('href')?.replace('commentary', 'squad'),
-                title: $match.find('a').first().text(),
-                details: $match.find('.match span').last().text(),
-                teamA: $current.first().find('.name').text(),
-                scoreA: $current.first().find('.score').text(),
-                flagA: $current.first().find('img').attr('src'),
-                info: $element.find('p.info').first().text(), // Changed $element instead of $element.find
-                teamB: $current.first().next().find('.name').text(),
-                scoreB: $current.first().next().find('.score').text(),
-                flagB: $current.first().next().find('img').attr('src'),
-                date:date
-            };
-            
-            if(match.linkCommentary !== 'https://www.cricketlineguru.comundefined'&& match.title!=='')
-            {
-              matchDetails.push(match);
-            }
+        // Extract team names from title
+        const teams = match.title.split(' vs ');
+        const teamAName = teams[0].trim();
+        const teamBName = teams[1]?.replace(',', '').trim();
+  
+        // Get match scores
+        const scoreBlock = $(element).find('.cb-scr-wll-chvrn');
+        const batTexts = scoreBlock.find('.cb-hmscg-bat-txt');
+        const bwlText = scoreBlock.find('.cb-hmscg-bwl-txt');
+        
+        // Handle both cases: two bat-txt elements or bat-txt + bwl-txt
+        if (batTexts.length === 2) {
+          // Case 1: Both teams are in bat-txt
+          match.teamA = $(batTexts[0]).find('.cb-hmscg-tm-nm').text().trim();
+          match.teamB = $(batTexts[1]).find('.cb-hmscg-tm-nm').text().trim();
+          match.scoreA = $(batTexts[0]).find('.cb-ovr-flo').eq(1).text().trim();
+          match.scoreB = $(batTexts[1]).find('.cb-ovr-flo').eq(1).text().trim();
+        } else {
+          // Case 2: Teams split between bat-txt and bwl-txt
+          const firstElement = batTexts.length > 0 && bwlText.length > 0 
+          ? (batTexts[0].startIndex < bwlText[0].startIndex ? batTexts : bwlText)
+          : (batTexts.length > 0 ? batTexts : bwlText);
+        
+        const secondElement = firstElement === batTexts ? bwlText : batTexts;
+          // Case 2: Teams split between bat-txt and bwl-txt
+          match.teamA = firstElement.find('.cb-hmscg-tm-nm').text().trim();
+          match.teamB = secondElement.find('.cb-hmscg-tm-nm').text().trim();
+          match.scoreA = firstElement.find('.cb-ovr-flo').eq(1).text().trim();
+          match.scoreB = secondElement.find('.cb-ovr-flo').eq(1).text().trim();
+        }
+        
+        // Get match status/result
+        match.status = scoreBlock.find('.cb-text-live').text() || 
+                       scoreBlock.find('.cb-text-complete').text() ||
+                       scoreBlock.find('.cb-text-preview').text();
+  
+        // Add flags to match details using full team names
+        match.flagA = teamFlags[teamAName] || teamFlags["Default"];;
+        match.flagB = teamFlags[teamBName] || teamFlags["Default"];;
+  
+        // Get match links
+        const links = $(element).find('nav a');
+        match.links = {};
+        links.each((i, link) => {
+          const text = $(link).text().toLowerCase()?.replace(/\s+/g, '');
+          const href = 'https://www.cricbuzz.com' + $(link).attr('href');
+          match.links[text] = href;
         });
-    });
-});
-
-      
+  
+        if(match.title) { // Only add if match has a title
+          matchDetails.push(match);
+        }
+      });
+  
       res.status(200).send(matchDetails);
     } catch (error) {
-      console.log(error);
+      console.error('Error fetching live matches:', error);
+      res.status(500).send({ error: 'Failed to fetch live matches' });
     }
-  },
+    
+  }
+
 
 
 };
