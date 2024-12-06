@@ -132,26 +132,13 @@ const MatchDataController = {
         const batTexts = scoreBlock.find('.cb-hmscg-bat-txt');
         const bwlText = scoreBlock.find('.cb-hmscg-bwl-txt');
         
-        // Handle both cases: two bat-txt elements or bat-txt + bwl-txt
-        if (batTexts.length === 2) {
-          // Case 1: Both teams are in bat-txt
-          match.teamA = $(batTexts[0]).find('.cb-hmscg-tm-nm').text().trim();
-          match.teamB = $(batTexts[1]).find('.cb-hmscg-tm-nm').text().trim();
-          match.scoreA = $(batTexts[0]).find('.cb-ovr-flo').eq(1).text().trim();
-          match.scoreB = $(batTexts[1]).find('.cb-ovr-flo').eq(1).text().trim();
-        } else {
+
           // Case 2: Teams split between bat-txt and bwl-txt
-          const firstElement = batTexts.length > 0 && bwlText.length > 0 
-          ? (batTexts[0].startIndex < bwlText[0].startIndex ? batTexts : bwlText)
-          : (batTexts.length > 0 ? batTexts : bwlText);
+          match.teamA = teamAName
+          match.teamB = teamBName
+          match.scoreA = ''
+          match.scoreB = ''
         
-        const secondElement = firstElement === batTexts ? bwlText : batTexts;
-          // Case 2: Teams split between bat-txt and bwl-txt
-          match.teamA = firstElement.find('.cb-hmscg-tm-nm').text().trim();
-          match.teamB = secondElement.find('.cb-hmscg-tm-nm').text().trim();
-          match.scoreA = firstElement.find('.cb-ovr-flo').eq(1).text().trim();
-          match.scoreB = secondElement.find('.cb-ovr-flo').eq(1).text().trim();
-        }
         
         // Get match status/result
         match.status = scoreBlock.find('.cb-text-live').text() || 
