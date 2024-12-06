@@ -14,7 +14,7 @@ const MatchDataController = {
       const $ = cheerio.load(html);
   
       // Load team flags from JSON file
-      const teamFlagsPath = path.join('./team_flags.json');
+      const teamFlagsPath = path.join(__dirname, '..', 'team_flags.json');
       const teamFlags = JSON.parse(fs.readFileSync(teamFlagsPath, 'utf8'));
   
       const matchDetails = [];
@@ -103,7 +103,7 @@ const MatchDataController = {
       const $ = cheerio.load(html);
   
       // Load team flags from JSON file
-      const teamFlagsPath = path.join('./team_flags.json');
+      const teamFlagsPath = path.join(__dirname, '..', 'team_flags.json');
       const teamFlags = JSON.parse(fs.readFileSync(teamFlagsPath, 'utf8'));
   
       const matchDetails = [];
@@ -192,7 +192,7 @@ const MatchDataController = {
       const $ = cheerio.load(html);
   
       // Load team flags from JSON file
-      const teamFlagsPath = path.join('./team_flags.json');
+      const teamFlagsPath = path.join(__dirname, '..', 'team_flags.json');
       const teamFlags = JSON.parse(fs.readFileSync(teamFlagsPath, 'utf8'));
   
       const matchDetails = [];

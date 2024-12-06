@@ -3,7 +3,7 @@ const cheerio = require('cheerio');
 const fs = require('fs');
 const path = require('path');
 
-const teamFlagsPath = path.join('./team_flags.json');
+const teamFlagsPath = path.join(__dirname, '..', 'team_flags.json');
 const teamFlags = JSON.parse(fs.readFileSync(teamFlagsPath, 'utf8'));
 
 const fetchRankingsData = async (url) => {

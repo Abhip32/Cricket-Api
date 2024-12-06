@@ -261,7 +261,7 @@ const scoreCardController = {
             const url = req.query.url.replace('live-cricket-scorecard', 'live-cricket-scores');
             const response = await axios.get(url);
             const $ = cheerio.load(response.data);
-            const teamFlagsPath = path.join('./team_flags.json');
+            const teamFlagsPath = path.join(__dirname, '..', 'team_flags.json');
             const teamFlags = JSON.parse(fs.readFileSync(teamFlagsPath, 'utf8'));
 
             const matchTitle = $('.cb-nav-hdr.cb-font-18').text().trim();
