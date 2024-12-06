@@ -78,7 +78,7 @@ const fetchNewsData = async (url) => {
     const newsItems = $('.cb-col.cb-col-100.cb-lst-itm.cb-pos-rel.cb-lst-itm-lg', html);
     newsItems.each(function () {
       const nlink = $(this).find('a').attr('href').trim();
-      const nimg = $(this).find('img').attr('src');
+      const nimg = $(this).find('img')?.attr('src')?.replace('205x152','500x500');
       const nhead = $(this).find('.cb-nws-hdln-ancr.text-hvr-underline').text().trim();
       const ninter = $(this).find('.cb-nws-intr').text().trim();
       const tit = $(this).find('.cb-nws-time').first().text().trim();
