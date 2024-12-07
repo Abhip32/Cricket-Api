@@ -58,8 +58,8 @@ const MatchDataController = {
         
         const secondElement = firstElement === batTexts ? bwlText : batTexts;
           // Case 2: Teams split between bat-txt and bwl-txt
-          match.teamA = firstElement.find('.cb-hmscg-tm-nm').text().trim();
-          match.teamB = secondElement.find('.cb-hmscg-tm-nm').text().trim();
+          match.teamA = teamAName
+          match.teamB = teamBName
           match.scoreA = firstElement.find('.cb-ovr-flo').eq(1).text().trim();
           match.scoreB = secondElement.find('.cb-ovr-flo').eq(1).text().trim();
         }
@@ -147,8 +147,8 @@ const MatchDataController = {
         
         const secondElement = firstElement === batTexts ? bwlText : batTexts;
           // Case 2: Teams split between bat-txt and bwl-txt
-          match.teamA = firstElement.find('.cb-hmscg-tm-nm').text().trim();
-          match.teamB = secondElement.find('.cb-hmscg-tm-nm').text().trim();
+          match.teamA = teamAName
+          match.teamB = teamBName
           match.scoreA = firstElement.find('.cb-ovr-flo').eq(1).text().trim();
           match.scoreB = secondElement.find('.cb-ovr-flo').eq(1).text().trim();
         }
