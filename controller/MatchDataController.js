@@ -27,11 +27,6 @@ const MatchDataController = {
         match.title = header.find('.text-hvr-underline').text().trim();
         match.series = header.closest('.cb-col.cb-col-100.cb-plyr-tbody').find('.cb-lv-grn-strip a').text().trim();
         
-        // Extract match info and time
-        const matchInfo = header.find('.text-gray').text().trim();
-        const timeMatch = matchInfo.match(/(\d{1,2}:\d{2} [APM]{2})/);
-        match.matchInfo = matchInfo;
-        match.time = timeMatch ? timeMatch[0] : '';
   
         // Extract team names from title
         const teams = match.title.split(' vs ');
@@ -79,7 +74,7 @@ const MatchDataController = {
         match.links = {};
         links.each((i, link) => {
           const text = $(link).text().toLowerCase()?.replace(/\s+/g, '');
-          const href = 'https://www.cricbuzz.com' + $(link).attr('href');
+          const href = $(link).attr('href');
           match.links[text] = href;
         });
   

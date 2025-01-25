@@ -3,10 +3,15 @@ const cheerio = require('cheerio');
 const fs = require('fs');
 const path = require('path');
 
+const formatUrl =(url) => {
+    return "https://cricbuzz.com"+url+"/"
+}
+
 const scoreCardController = {
     getScoreCard: async (req, res) => {
         try {
-            const url = req.query.url;
+            const url = formatUrl(req.query.url)
+    
             const response = await axios.get(url);
             const $ = cheerio.load(response.data);
             
@@ -145,7 +150,7 @@ const scoreCardController = {
 
     getSquads: async (req, res) => {
         try {
-            const url = req.query.url;
+            const url = formatUrl(req.query.url)
             const squadsUrl = url.replace('live-cricket-scorecard', 'cricket-match-squads');
             const squadsResponse = await axios.get(squadsUrl);
             const squads$ = cheerio.load(squadsResponse.data);
@@ -193,7 +198,7 @@ const scoreCardController = {
 
     getCommentary: async (req, res) => {
         try {
-            const url = req.query.url;
+            const url = formatUrl(req.query.url)
             const commentaryUrl = url.replace('live-cricket-scorecard', 'live-cricket-scores');
             const commentaryResponse = await axios.get(commentaryUrl);
             const commentary$ = cheerio.load(commentaryResponse.data);
@@ -220,7 +225,7 @@ const scoreCardController = {
 
     getNews: async (req, res) => {
         try {
-            const url = req.query.url;
+            const url = formatUrl(req.query.url)
             const newsUrl = url.replace('live-cricket-scorecard', 'cricket-match-news');
             const newsResponse = await axios.get(newsUrl);
             const news$ = cheerio.load(newsResponse.data);
@@ -258,7 +263,7 @@ const scoreCardController = {
 
     getMiniScorecard: async (req, res) => {
         try {
-            const url = req.query.url.replace('live-cricket-scorecard', 'live-cricket-scores');
+            const url = formatUrl(req.query.url.replace('live-cricket-scorecard', 'live-cricket-scores'))
             const response = await axios.get(url);
             const $ = cheerio.load(response.data);
             const teamFlagsPath = path.join(__dirname, '..', 'team_flags.json');
@@ -302,16 +307,8 @@ const scoreCardController = {
                     team: '',
                     score: '',
                     currentBowlers: []
-                },
-                status: $('.cb-text-stumps').text().trim() || $('.cb-text-complete').text().trim(),
-                crr: '',
-                partnership: '',
-                lastWicket: '',
-                recentBalls: '',
-                toss: '',
-                lastTenOvers: '',
-                playerOfTheMatch: [],
-                playerOfTheSeries: []
+                },             
+                recentBalls: ''
             };
 
             // Check if match is complete
@@ -330,23 +327,23 @@ const scoreCardController = {
                 });
 
                 // Get player of the match
-                $('.cb-mom-itm').each((i, element) => {
-                    const type = $(element).find('.cb-text-gray').text().trim();
-                    const playerName = $(element).find('.cb-link-undrln').text().trim();
-                    const playerLink = $(element).find('.cb-link-undrln').attr('href');
+                // $('.cb-mom-itm').each((i, element) => {
+                //     const type = $(element).find('.cb-text-gray').text().trim();
+                //     const playerName = $(element).find('.cb-link-undrln').text().trim();
+                //     const playerLink = $(element).find('.cb-link-undrln').attr('href');
 
-                    if (type.includes('PLAYER OF THE MATCH')) {
-                        miniScorecard.playerOfTheMatch.push({
-                            name: playerName,
-                            link: playerLink
-                        });
-                    } else if (type.includes('PLAYER OF THE SERIES')) {
-                        miniScorecard.playerOfTheSeries.push({
-                            name: playerName,
-                            link: playerLink
-                        });
-                    }
-                });
+                //     if (type.includes('PLAYER OF THE MATCH')) {
+                //         miniScorecard.playerOfTheMatch.push({
+                //             name: playerName,
+                //             link: playerLink
+                //         });
+                //     } else if (type.includes('PLAYER OF THE SERIES')) {
+                //         miniScorecard.playerOfTheSeries.push({
+                //             name: playerName,
+                //             link: playerLink
+                //         });
+                //     }
+                // });
             } else {
                 // Get batting team score
                 const battingScore = $('.cb-min-bat-rw').first().text().trim();
@@ -359,8 +356,6 @@ const scoreCardController = {
                 miniScorecard.bowling.team = bowlingTeam;
                 miniScorecard.bowling.score = scoreb;
 
-                // Get CRR
-                miniScorecard.crr = $('.cb-font-12.cb-text-gray .ng-binding').next().text().trim();
 
                 // Get current batsmen
                 $('.cb-min-inf').first().find('.cb-min-itm-rw').each((i, element) => {
@@ -408,15 +403,7 @@ const scoreCardController = {
                     }
                 });
 
-                // Get partnership
-                const partnership = $('.cb-min-itm-rw').first().text().trim();
-                miniScorecard.partnership = partnership.includes('Partnership') ? 
-                    partnership.split('Partnership: ')[1] : '';
-
-                // Get last wicket
-                const lastWicket = $('.cb-min-itm-rw').eq(1).text().trim();
-                miniScorecard.lastWicket = lastWicket.includes('Last Wkt') ? 
-                    lastWicket.split('Last Wkt: ')[1] : '';
+              
 
                 // Get recent balls
                 miniScorecard.recentBalls = $('.cb-min-rcnt span').last().text().trim();
@@ -425,10 +412,6 @@ const scoreCardController = {
                 const toss = $('.cb-min-itm-rw').last().text().trim();
                 miniScorecard.toss = toss.includes('Toss') ? toss.split('Toss: ')[1] : '';
 
-                // Get last 10 overs
-                const lastTenOvers = $('.cb-min-itm-rw').eq(3).text().trim();
-                miniScorecard.lastTenOvers = lastTenOvers.includes('Last 10 overs') ? 
-                    lastTenOvers.split('Last 10 overs: ')[1] : '';
             }
 
             res.status(200).json(miniScorecard);
