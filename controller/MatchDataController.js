@@ -162,7 +162,7 @@ const MatchDataController = {
         match.links = {};
         links.each((i, link) => {
           const text = $(link).text().toLowerCase()?.replace(/\s+/g, '');
-          const href = 'https://www.cricbuzz.com' + $(link).attr('href');
+          const href = $(link).attr('href');
           match.links[text] = href;
         });
   
@@ -238,7 +238,7 @@ const MatchDataController = {
         match.links = {};
         links.each((i, link) => {
           const text = $(link).text().toLowerCase()?.replace(/\s+/g, '');
-          const href = 'https://www.cricbuzz.com' + $(link).attr('href');
+          const href = $(link).attr('href');
           match.links[text] = href;
         });
   
