@@ -79,7 +79,7 @@ const scoreCardController = {
                 inning.fallOfWickets = fowText.split(',').map(fow => fow.trim());
 
                 // Process bowling
-                $(inningElement).find('.cb-ltst-wgt-hdr').last().find('.cb-scrd-itms').each((i, element) => {
+                $(inningElement).find('.cb-ltst-wgt-hdr').find('.cb-scrd-itms').each((i, element) => {
                     const bowler = {
                         name: $(element).find('.cb-col-38 a').text().trim(),
                         overs: $(element).find('.cb-col-8').eq(0).text().trim(),
@@ -90,7 +90,8 @@ const scoreCardController = {
                         wides: $(element).find('.cb-col-8').eq(5).text().trim(),
                         economy: $(element).find('.cb-col-10').last().text().trim()
                     };
-                    inning.bowling.push(bowler);
+                    if (bowler.name !== "" && bowler.name !== undefined){
+                    inning.bowling.push(bowler);}
                 });
 
                 matchData.innings.push(inning);
