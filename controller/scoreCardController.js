@@ -327,24 +327,24 @@ const scoreCardController = {
                     }
                 });
 
-                // Get player of the match
-                // $('.cb-mom-itm').each((i, element) => {
-                //     const type = $(element).find('.cb-text-gray').text().trim();
-                //     const playerName = $(element).find('.cb-link-undrln').text().trim();
-                //     const playerLink = $(element).find('.cb-link-undrln').attr('href');
+                //Get player of the match
+                $('.cb-mom-itm').each((i, element) => {
+                    const type = $(element).find('.cb-text-gray').text().trim();
+                    const playerName = $(element).find('.cb-link-undrln').text().trim();
+                    const playerLink = $(element).find('.cb-link-undrln').attr('href');
 
-                //     if (type.includes('PLAYER OF THE MATCH')) {
-                //         miniScorecard.playerOfTheMatch.push({
-                //             name: playerName,
-                //             link: playerLink
-                //         });
-                //     } else if (type.includes('PLAYER OF THE SERIES')) {
-                //         miniScorecard.playerOfTheSeries.push({
-                //             name: playerName,
-                //             link: playerLink
-                //         });
-                //     }
-                // });
+                    if (type.includes('PLAYER OF THE MATCH')) {
+                        miniScorecard.playerOfTheMatch={
+                            name: playerName,
+                            link: playerLink
+                        };
+                    } else if (type.includes('PLAYER OF THE SERIES')) {
+                        miniScorecard.playerOfTheSeries.push={
+                            name: playerName,
+                            link: playerLink
+                        };
+                    }
+                });
             } else {
                 // Get batting team score
                 const battingScore = $('.cb-min-bat-rw').first().text().trim();
@@ -408,7 +408,23 @@ const scoreCardController = {
 
                 // Get recent balls
                 miniScorecard.recentBalls = $('.cb-min-rcnt span').last().text().trim();
+                  $('.cb-mom-itm').each((i, element) => {
+                    const type = $(element).find('.cb-text-gray').text().trim();
+                    const playerName = $(element).find('.cb-link-undrln').text().trim();
+                    const playerLink = $(element).find('.cb-link-undrln').attr('href');
 
+                    if (type.includes('PLAYER OF THE MATCH')) {
+                        miniScorecard.playerOfTheMatch.push({
+                            name: playerName,
+                            link: playerLink
+                        });
+                    } else if (type.includes('PLAYER OF THE SERIES')) {
+                        miniScorecard.playerOfTheSeries.push({
+                            name: playerName,
+                            link: playerLink
+                        });
+                    }
+                });
                 // Get toss
                 const toss = $('.cb-min-itm-rw').last().text().trim();
                 miniScorecard.toss = toss.includes('Toss') ? toss.split('Toss: ')[1] : '';
