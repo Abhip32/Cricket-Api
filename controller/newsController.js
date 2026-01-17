@@ -1,97 +1,79 @@
-const axios = require('axios');
-const cheerio = require('cheerio');
 const puppeteer = require('puppeteer');
 
+const autoScroll = async (page) => {
+  await page.evaluate(async () => {
+    await new Promise((resolve) => {
+      let totalHeight = 0;
+      const distance = 100;
+      const timer = setInterval(() => {
+        const scrollHeight = document.body.scrollHeight;
+        window.scrollBy(0, distance);
+        totalHeight += distance;
 
+        if (totalHeight >= scrollHeight) {
+          clearInterval(timer);
+          resolve();
+        }
+      }, 100);
+    });
+  });
+};
 
 const newsController = {
   getNews: async (req, res) => {
+    let page;
     try {
-      const newsItems = await fetchNewsData('https://www.cricbuzz.com/cricket-news/latest-news')
-  
-      const top5News = newsItems.slice(0, 5);
-      res.status(200).json(top5News);
-    } catch (error) {
-      console.log(error);
+      const browser = global.getBrowser(); // your global Puppeteer browser
+      page = await browser.newPage();
+
+      await page.setUserAgent(
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36'
+      );
+
+      await page.goto(
+        'https://www.espncricinfo.com/cricket-news',
+        { waitUntil: 'networkidle2', timeout: 0 }
+      );
+
+      // Scroll to load all lazy images/content
+      await autoScroll(page);
+
+      // Extract news directly in browser context
+      const newsList = await page.evaluate(() => {
+  return Array.from(document.querySelectorAll('.ds-border-b.ds-border-line.ds-p-4')).map(card => {
+    const titleEl = card.querySelector('p.ds-text-title-s');
+    const title = titleEl ? titleEl.innerText.trim() : '';
+
+    // Select parent div using class contains to avoid invalid selectors
+    const parentDiv = card.querySelector('div[class*="ds-w-4/5"] div.ds-flex-col');
+    let description = '';
+    if (parentDiv) {
+      description = Array.from(parentDiv.children)
+        .filter(el => !el.classList.contains('ds-leading-[0]') && !el.classList.contains('ds-text-title-s'))
+        .map(el => el.innerText.trim())
+        .join(' ');
     }
-  },
-  
-  getNewsPlus: async (req, res) => {
-    try {
-  
-      const newsItems =await fetchNewsData('https://www.cricbuzz.com/cricket-news/editorial/cb-plus')
-  
-      res.status(200).json(newsItems);
-    } catch (error) {
-      console.log(error);
+
+    const spans = card.querySelectorAll('.ds-text-compact-xs span');
+    const dateTime = spans[0]?.innerText.trim() || '';
+    const author = spans[2]?.innerText.trim() || '';
+    const image = card.querySelector('img')?.src || null;
+    const linkEl = card.querySelector('a');
+    const link = linkEl?.href ? `https://www.espncricinfo.com${linkEl.href}` : null;
+
+    return { title, description, dateTime, author, image, link };
+  });
+});
+
+
+      res.status(200).json(newsList);
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: 'Scraping news failed' });
+    } finally {
+      if (page) await page.close();
     }
-  },
-  
-  getSpotlight: async (req, res) => {
-    try {
-      const newsItems =await fetchNewsData('https://www.cricbuzz.com/cricket-news/editorial/spotlight')
-  
-      res.status(200).json(newsItems);
-    } catch (error) {
-      console.log(error);
-    }
-  },
-  
-  getOpinions: async (req, res) => {
-    try {
-      const newsItems =await fetchNewsData('https://www.cricbuzz.com/cricket-news/editorial/editorial-list')
-  
-  
-      res.status(200).json(newsItems);
-    } catch (error) {
-      console.log(error);
-    }
-  },
-    
-  getSpecials :async (req, res) => {
-    const url = 'https://www.cricbuzz.com/cricket-news/editorial/specials';
-    const specialsData = await fetchNewsData(url);
-    res.status(200).json(specialsData);
-  },
-  
-  getStats : async (req, res) => {
-    const url = 'https://www.cricbuzz.com/cricket-news/editorial/stats-analysis';
-    const statsData = await fetchNewsData(url);
-    res.status(200).json(statsData);
-  },
-  
-    getInterviews : async (req, res) => {
-    const url = 'https://www.cricbuzz.com/cricket-news/editorial/interviews';
-    const interviewsData = await fetchNewsData(url);
-    res.status(200).json(interviewsData);
-  }
-}
-
-
-const fetchNewsData = async (url) => {
-  try {
-    const response = await axios.get(url);
-    const html = response.data;
-    const $ = cheerio.load(html);
-
-    const newsData = [];
-    const newsItems = $('.cb-col.cb-col-100.cb-lst-itm.cb-pos-rel.cb-lst-itm-lg', html);
-    newsItems.each(function () {
-      const news_link = $(this).find('a').attr('href').trim();
-      const news_img = $(this).find('img')?.attr('src')?.replace('205x152','500x500');
-      const news_headline = $(this).find('.cb-nws-hdln-ancr.text-hvr-underline').text().trim();
-      const news_content= $(this).find('.cb-nws-intr').text().trim();
-      const news_title = $(this).find('.cb-nws-time').first().text().trim();
-
-      newsData.push({ news_title, news_link,news_img, news_headline, news_content });
-    });
-
-    return newsData;
-  } catch (error) {
-    console.log(error);
-    return [];
   }
 };
-
 
 module.exports = newsController;

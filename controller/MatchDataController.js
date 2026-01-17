@@ -1,259 +1,339 @@
-const axios = require('axios');
 const cheerio = require('cheerio');
-const fs = require('fs');
-const path = require('path');
 
+
+async function autoScroll(page) {
+  await page.evaluate(async () => {
+    await new Promise((resolve) => {
+      let totalHeight = 0;
+      const distance = 500; // px per scroll
+      const timer = setInterval(() => {
+        const scrollHeight = document.body.scrollHeight;
+        window.scrollBy(0, distance);
+        totalHeight += distance;
+
+        if (totalHeight >= scrollHeight) {
+          clearInterval(timer);
+          resolve();
+        }
+      }, 100); // wait 100ms per scroll
+    });
+  });
+}
 
 const MatchDataController = {
+  getLiveMatches :async (req, res) => {
+  let page;
 
-  
-  getLiveMatches: async (req, res) => {
-    try {
-      const response = await axios.get('https://www.cricbuzz.com/cricket-match/live-scores');
-      const html = response.data;
-      const $ = cheerio.load(html);
-  
-      // Load team flags from JSON file
-      const teamFlagsPath = path.join('./team_flags.json');
-      const teamFlags = JSON.parse(fs.readFileSync(teamFlagsPath, 'utf8'));
-  
-      const matchDetails = [];
-  
-      $('.cb-mtch-lst').each((index, element) => {
-        const match = {};
-        
-        // Get match header info
-        const header = $(element).find('.cb-col-100.cb-col.cb-schdl.cb-billing-plans-text');
-        match.title = header.find('.text-hvr-underline').text().trim();
-        match.series = header.closest('.cb-col.cb-col-100.cb-plyr-tbody').find('.cb-lv-grn-strip a').text().trim();
-        
-  
-        // Extract team names from title
-        const teams = match.title.split(' vs ');
-        const teamAName = teams[0].trim();
-        const teamBName = teams[1]?.replace(',', '').trim();
-  
-        // Get match scores
-        const scoreBlock = $(element).find('.cb-scr-wll-chvrn');
-        const batTexts = scoreBlock.find('.cb-hmscg-bat-txt');
-        const bwlText = scoreBlock.find('.cb-hmscg-bwl-txt');
-        
-        // Handle both cases: two bat-txt elements or bat-txt + bwl-txt
-        if (batTexts.length === 2) {
-          // Case 1: Both teams are in bat-txt
-          match.teamA = $(batTexts[0]).find('.cb-hmscg-tm-nm').text().trim();
-          match.teamB = $(batTexts[1]).find('.cb-hmscg-tm-nm').text().trim();
-          match.scoreA = $(batTexts[0]).find('.cb-ovr-flo').eq(1).text().trim();
-          match.scoreB = $(batTexts[1]).find('.cb-ovr-flo').eq(1).text().trim();
-        } else {
+  try {
+    const browser = global.getBrowser();
+    page = await browser.newPage();
 
-          const firstElement = batTexts.length > 0 && bwlText.length > 0 
-          ? (batTexts[0].startIndex < bwlText[0].startIndex ? batTexts : bwlText)
-          : (batTexts.length > 0 ? batTexts : bwlText);
-        
-        const secondElement = firstElement === batTexts ? bwlText : batTexts;
-          // Case 2: Teams split between bat-txt and bwl-txt
-          match.teamA = firstElement.find('.cb-hmscg-tm-nm').text().trim();
-          match.teamB = secondElement.find('.cb-hmscg-tm-nm').text().trim();
-          match.scoreA = firstElement.find('.cb-ovr-flo').eq(1).text().trim();
-          match.scoreB = secondElement.find('.cb-ovr-flo').eq(1).text().trim();
-        }
-        
-        // Get match status/result
-        match.status = scoreBlock.find('.cb-text-live').text() || 
-                       scoreBlock.find('.cb-text-complete').text() ||
-                       scoreBlock.find('.cb-text-preview').text()||
-                       $(element).find('.cb-lv-scrs-well.cb-lv-scrs-well-preview').text().trim();
-  
-        // Add flags to match details using full team names
-        match.flagA = teamFlags[match.teamA] || teamFlags["Default"];;
-        match.flagB = teamFlags[match.teamB] || teamFlags["Default"];;
-  
-        // Get match links
-        const links = $(element).find('nav a');
-        match.links = {};
-        links.each((i, link) => {
-          const text = $(link).text().toLowerCase()?.replace(/\s+/g, '');
-          const href = $(link).attr('href');
-          match.links[text] = href;
+    await page.setUserAgent(
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36'
+    );
+
+    await page.goto(
+      'https://www.espncricinfo.com/live-cricket-score',
+      { waitUntil: 'networkidle2', timeout: 0 }
+    );
+    // Scroll to load all lazy content
+    await autoScroll(page);
+
+    const html = await page.content();
+    const $ = cheerio.load(html);
+
+    const response = [];
+
+    // 👉 Each SERIES block
+    $('.ds-w-full.ds-bg-fill-content-prime').each((i, seriesEl) => {
+      const series = {};
+
+      // Series name
+      series.series = $(seriesEl)
+        .find('h2 span.ds-text-title-xs')
+        .first()
+        .text()
+        .trim();
+
+      series.matches = [];
+
+      // 👉 Each MATCH card inside series
+      $(seriesEl)
+        .find('.ds-border-b.ds-border-line.ds-w-full')
+        .each((j, matchEl) => {
+          const match = {};
+
+          // Match link
+          const linkEl = $(matchEl).find('a.ds-no-tap-higlight').first();
+          match.link = linkEl.attr('href')
+            ? `https://www.espncricinfo.com${linkEl.attr('href')}`
+            : null;
+
+          // Status (RESULT / LIVE / Today 7:30 PM)
+          match.status = $(matchEl)
+            .find('.ds-text-tight-xs.ds-font-bold.ds-uppercase')
+            .first()
+            .text()
+            .trim();
+
+          // Match info
+          match.matchInfo = $(matchEl)
+            .find('.ds-text-tight-xs.ds-text-typo-mid3')
+            .first()
+            .text()
+            .trim();
+
+          // Teams
+          match.teams = [];
+
+          $(matchEl).find('.ci-team-score').each((k, teamEl) => {
+            const team = {};
+
+            team.name = $(teamEl)
+              .find('p.ds-text-tight-m')
+              .text()
+              .trim();
+
+            team.flag = $(teamEl).find('img').attr('src') || null;
+
+            const metaText = $(teamEl)
+              .find('span.ds-text-compact-xs')
+              .text()
+              .trim(); // (19/20 ov, T:196)
+
+            if (metaText) {
+              const cleaned = metaText.replace(/[()]/g, '');
+              cleaned.split(',').forEach(part => {
+                if (part.includes('ov')) team.overs = part.trim();
+                if (part.includes('T:')) team.target = part.trim();
+              });
+            }
+
+            team.score = $(teamEl)
+              .find('strong')
+              .text()
+              .trim();
+
+            team.fullScore = metaText
+              ? `${team.score} ${metaText}`
+              : team.score;
+
+            match.teams.push(team);
+          });
+
+          // Result / Preview text
+          match.result = $(matchEl)
+            .find('p.ds-text-tight-s.ds-font-medium')
+            .text()
+            .trim();
+
+          if (match.teams.length >= 2) {
+            series.matches.push(match);
+          }
         });
-  
-        if(match.title) { // Only add if match has a title
-          matchDetails.push(match);
-        }
-      });
-  
-      res.status(200).send(matchDetails);
-    } catch (error) {
-      console.error('Error fetching live matches:', error);
-      res.status(500).send({ error: 'Failed to fetch live matches' });
-    }
-  },
+
+      if (series.matches.length > 0) {
+        response.push(series);
+      }
+    });
+
+    res.status(200).json(response);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Scraping failed' });
+  } finally {
+    if (page) await page.close();
+  }
+},
 
 
   getRecentMatches : async (req, res) => {
-    try {
-      const response = await axios.get('https://www.cricbuzz.com/cricket-match/live-scores/recent-matches');
-      const html = response.data;
-      const $ = cheerio.load(html);
-  
-      // Load team flags from JSON file
-      const teamFlagsPath = path.join('./team_flags.json');
-      const teamFlags = JSON.parse(fs.readFileSync(teamFlagsPath, 'utf8'));
-  
-      const matchDetails = [];
-  
-      $('.cb-mtch-lst').each((index, element) => {
-        const match = {};
-        
-        // Get match header info
-        const header = $(element).find('.cb-col-100.cb-col.cb-schdl.cb-billing-plans-text');
-        match.title = header.find('.text-hvr-underline').text().trim();
-        match.series = header.closest('.cb-col.cb-col-100.cb-plyr-tbody').find('.cb-lv-grn-strip a').text().trim();
-        
-        // Extract match info and time
-        const matchInfo = header.find('.text-gray').text().trim();
-        const timeMatch = matchInfo.match(/(\d{1,2}:\d{2} [APM]{2})/);
-        match.matchInfo = matchInfo;
-        match.time = timeMatch ? timeMatch[0] : '';
+  let page;
 
-        // Extract team names from title
-        const teams = match.title.split(' vs ');
-        const teamAName = teams[0].trim();
-        const teamBName = teams[1]?.replace(',', '').trim();
-  
-        // Get match scores
-        const scoreBlock = $(element).find('.cb-scr-wll-chvrn');
-        const batTexts = scoreBlock.find('.cb-hmscg-bat-txt');
-        const bwlText = scoreBlock.find('.cb-hmscg-bwl-txt');
-        
-        // Handle both cases: two bat-txt elements or bat-txt + bwl-txt
-        if (batTexts.length === 2) {
-          // Case 1: Both teams are in bat-txt
-          match.teamA = $(batTexts[0]).find('.cb-hmscg-tm-nm').text().trim();
-          match.teamB = $(batTexts[1]).find('.cb-hmscg-tm-nm').text().trim();
-          match.scoreA = $(batTexts[0]).find('.cb-ovr-flo').eq(1).text().trim();
-          match.scoreB = $(batTexts[1]).find('.cb-ovr-flo').eq(1).text().trim();
-        } else {
-          // Case 2: Teams split between bat-txt and bwl-txt
-          const firstElement = batTexts.length > 0 && bwlText.length > 0 
-          ? (batTexts[0].startIndex < bwlText[0].startIndex ? batTexts : bwlText)
-          : (batTexts.length > 0 ? batTexts : bwlText);
-        
-        const secondElement = firstElement === batTexts ? bwlText : batTexts;
-          // Case 2: Teams split between bat-txt and bwl-txt
-          match.teamA = firstElement.find('.cb-hmscg-tm-nm').text().trim();
-          match.teamB = secondElement.find('.cb-hmscg-tm-nm').text().trim();
-          match.scoreA = firstElement.find('.cb-ovr-flo').eq(1).text().trim();
-          match.scoreB = secondElement.find('.cb-ovr-flo').eq(1).text().trim();
-        }
-        
-        // Get match status/result
-        match.status = scoreBlock.find('.cb-text-live').text() || 
-                       scoreBlock.find('.cb-text-complete').text() ||
-                       scoreBlock.find('.cb-text-preview').text();
-  
-        // Add flags to match details using full team names
-        match.flagA = teamFlags[match.teamA] || teamFlags["Default"];;
-        match.flagB = teamFlags[match.teamB] || teamFlags["Default"];;
-  
-        // Get match links
-        const links = $(element).find('nav a');
-        match.links = {};
-        links.each((i, link) => {
-          const text = $(link).text().toLowerCase()?.replace(/\s+/g, '');
-          const href = $(link).attr('href');
-          match.links[text] = href;
+  try {
+    const browser = global.getBrowser();
+    page = await browser.newPage();
+
+    await page.setUserAgent(
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36'
+    );
+
+    await page.goto(
+      'https://www.espncricinfo.com/live-cricket-match-results',
+      { waitUntil: 'networkidle2', timeout: 0 }
+    );
+    // Scroll to load all lazy content
+    await autoScroll(page);
+
+    const html = await page.content();
+    const $ = cheerio.load(html);
+
+    const response = [];
+
+    // 👉 Each SERIES block
+    $('.ds-w-full.ds-bg-fill-content-prime').each((i, seriesEl) => {
+      const series = {};
+
+      // Series name
+      series.series = $(seriesEl)
+        .find('h2 span.ds-text-title-xs')
+        .first()
+        .text()
+        .trim();
+
+      series.matches = [];
+
+      // 👉 Each MATCH card inside series
+      $(seriesEl)
+        .find('.ds-border-b.ds-border-line.ds-w-full')
+        .each((j, matchEl) => {
+          const match = {};
+
+          // Match link
+          const linkEl = $(matchEl).find('a.ds-no-tap-higlight').first();
+          match.link = linkEl.attr('href')
+            ? `https://www.espncricinfo.com${linkEl.attr('href')}`
+            : null;
+
+          // Status (RESULT / LIVE / Today 7:30 PM)
+          match.status = $(matchEl)
+            .find('.ds-text-tight-xs.ds-font-bold.ds-uppercase')
+            .first()
+            .text()
+            .trim();
+
+          // Match info
+          match.matchInfo = $(matchEl)
+            .find('.ds-text-tight-xs.ds-text-typo-mid3')
+            .first()
+            .text()
+            .trim();
+
+          // Teams
+          match.teams = [];
+
+          $(matchEl).find('.ci-team-score').each((k, teamEl) => {
+            const team = {};
+
+            team.name = $(teamEl)
+              .find('p.ds-text-tight-m')
+              .text()
+              .trim();
+
+            team.flag = $(teamEl).find('img').attr('src') || null;
+
+            const metaText = $(teamEl)
+              .find('span.ds-text-compact-xs')
+              .text()
+              .trim(); // (19/20 ov, T:196)
+
+            if (metaText) {
+              const cleaned = metaText.replace(/[()]/g, '');
+              cleaned.split(',').forEach(part => {
+                if (part.includes('ov')) team.overs = part.trim();
+                if (part.includes('T:')) team.target = part.trim();
+              });
+            }
+
+            team.score = $(teamEl)
+              .find('strong')
+              .text()
+              .trim();
+
+            team.fullScore = metaText
+              ? `${team.score} ${metaText}`
+              : team.score;
+
+            match.teams.push(team);
+          });
+
+          // Result / Preview text
+          match.result = $(matchEl)
+            .find('p.ds-text-tight-s.ds-font-medium')
+            .text()
+            .trim();
+
+          if (match.teams.length >= 2) {
+            series.matches.push(match);
+          }
         });
-  
-        if(match.title) { // Only add if match has a title
-          matchDetails.push(match);
-        }
-      });
-  
-      res.status(200).send(matchDetails);
-    } catch (error) {
-      console.error('Error fetching live matches:', error);
-      res.status(500).send({ error: 'Failed to fetch live matches' });
-    }
 
-    
+      if (series.matches.length > 0) {
+        response.push(series);
+      }
+    });
+
+    res.status(200).json(response);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Scraping failed' });
+  } finally {
+    if (page) await page.close();
+  }
+
+
   },
 
-  getUpcomingMatches : async (req, res) => {
-    try {
-      const response = await axios.get('https://www.cricbuzz.com/cricket-match/live-scores/upcoming-matches');
-      const html = response.data;
-      const $ = cheerio.load(html);
-  
-      // Load team flags from JSON file
-      const teamFlagsPath = path.join('./team_flags.json');
-      const teamFlags = JSON.parse(fs.readFileSync(teamFlagsPath, 'utf8'));
-  
-      const matchDetails = [];
-  
-      $('.cb-mtch-lst').each((index, element) => {
-        const match = {};
-        
-        // Get match header info
-        const header = $(element).find('.cb-col-100.cb-col.cb-schdl.cb-billing-plans-text');
-        match.title = header.find('.text-hvr-underline').text().trim();
-        match.series = header.closest('.cb-col.cb-col-100.cb-plyr-tbody').find('.cb-lv-grn-strip a').text().trim();
-        
-        // Extract match info and time
-        const matchInfo = header.find('.text-gray').text().trim();
-        const timeMatch = matchInfo.match(/(\d{1,2}:\d{2} [APM]{2})/);
-        match.matchInfo = matchInfo;
-        match.time = timeMatch ? timeMatch[0] : '';
+getUpcomingMatches: async (req, res) => {
+  const date = req.query.date;
+  let page;
+  try {
+    const browser = global.getBrowser();
+    page = await browser.newPage();
 
-        // Extract team names from title
-        const teams = match.title.split(' vs ');
-        const teamAName = teams[0].trim();
-        const teamBName = teams[1]?.replace(',', '').trim();
-  
-        // Get match scores
-        const scoreBlock = $(element).find('.cb-scr-wll-chvrn');
-        const batTexts = scoreBlock.find('.cb-hmscg-bat-txt');
-        const bwlText = scoreBlock.find('.cb-hmscg-bwl-txt');
-        
+    await page.setUserAgent(
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36'
+    );
 
-          // Case 2: Teams split between bat-txt and bwl-txt
-          match.teamA = teamAName
-          match.teamB = teamBName
-          match.scoreA = ''
-          match.scoreB = ''
-        
-        
-        // Get match status/result
-        match.status = scoreBlock.find('.cb-text-live').text() || 
-                       scoreBlock.find('.cb-text-complete').text() ||
-                       scoreBlock.find('.cb-text-preview').text();
-  
-        // Add flags to match details using full team names
-        match.flagA = teamFlags[teamAName] || teamFlags["Default"];;
-        match.flagB = teamFlags[teamBName] || teamFlags["Default"];;
-  
-        // Get match links
-        const links = $(element).find('nav a');
-        match.links = {};
-        links.each((i, link) => {
-          const text = $(link).text().toLowerCase()?.replace(/\s+/g, '');
-          const href = $(link).attr('href');
-          match.links[text] = href;
+    await page.goto(
+      'https://www.espncricinfo.com/live-cricket-match-schedule-fixtures?date=' + date,
+      { waitUntil: 'networkidle2', timeout: 0 }
+    );
+
+    await autoScroll(page); // scroll to load all lazy content
+
+    const html = await page.content();
+    const $ = cheerio.load(html);
+
+    const response = [];
+
+    $('.ds-mb-6').each((i, dateBlock) => {
+      const date = $(dateBlock).find('span.ds-text-tight-s').first().text().trim();
+
+      // loop over actual match cards
+      $(dateBlock).find('div.ds-bg-fill-content-prime').each((j, cardEl) => {
+        const teams = $(cardEl).find('p.ds-text-compact-s').first().text().trim();
+        if (!teams) return; // skip empty cards
+
+        const venueInfoFull = $(cardEl).find('div.ds-text-tight-xs').first().text().trim();
+        const venueParts = venueInfoFull.split(',');
+        const venueInfo = venueParts.slice(1).join(',').trim(); // skip match number
+
+        const seriesName = $(cardEl).find('a.ds-inline-flex span').first().text().trim();
+        const startTime = $(cardEl).find('time').first().text().trim();
+
+        const linkEl = $(cardEl).find('a').first();
+        const link = linkEl.attr('href') ? `https://www.espncricinfo.com${linkEl.attr('href')}` : null;
+
+        response.push({
+          date,
+          teams,
+          venueInfo,
+          seriesName,
+          startTime,
+          link
         });
-  
-        if(match.title) { // Only add if match has a title
-          matchDetails.push(match);
-        }
       });
-  
-      res.status(200).send(matchDetails);
-    } catch (error) {
-      console.error('Error fetching live matches:', error);
-      res.status(500).send({ error: 'Failed to fetch live matches' });
-    }
-    
+    });
+
+    res.status(200).json(response);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Scraping failed' });
+  } finally {
+    if (page) await page.close();
   }
+}
 
 
 
