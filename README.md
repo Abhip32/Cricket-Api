@@ -8,11 +8,16 @@ A high-performance, resilient REST API and web scraper for real-time cricket dat
 
 ## 📱 Frontend Companion: CricGeek UI
 
-This backend powers **[CricGeek](https://github.com/Abhip32/CricGeek)** — a luxury cricket sports platform built with Next.js 15, React 19, Tailwind CSS, and Framer Motion.
+This backend powers **[CricGeek](https://github.com/Abhip32/CricGeek)** — a luxury cricket sports platform built with Next.js 15, React 19, Tailwind CSS, and Framer Motion.  
+🌐 **Live Web Application**: [https://cric-geek.vercel.app](https://cric-geek.vercel.app)
 
-| Live Match Center | Full Innings Scorecard |
+| Home Dashboard | Live Match Center |
 |:---:|:---:|
-| ![Live Match Center](assets/cricgeek-matches.png) | ![Interactive Scorecard](assets/cricgeek-scorecard.png) |
+| ![Home Dashboard](assets/cricgeek-home.png) | ![Live Match Center](assets/cricgeek-matches.png) |
+
+| Innings Scorecard & Analytics | Match Schedule & Fixtures | Official ICC Leaderboards |
+|:---:|:---:|:---:|
+| ![Interactive Scorecard](assets/cricgeek-scorecard.png) | ![Tournament Schedule](assets/cricgeek-schedule.png) | ![ICC Rankings](assets/cricgeek-rankings.png) |
 
 ---
 
