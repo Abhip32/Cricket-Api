@@ -4,7 +4,7 @@
     "AWS_LAMBDA_JS_RUNTIME": "nodejs20.x"
   },
   "functions": {
-    "index.js": {
+    "api/index.js": {
       "maxDuration": 60,
       "memory": 1024
     }
@@ -12,7 +12,7 @@
   "rewrites": [
     {
       "source": "/(.*)",
-      "destination": "/index.js"
+      "destination": "/api/index.js"
     }
   ]
 }
