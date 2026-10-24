@@ -311,25 +311,34 @@ async function fetchPageHtml(url, options = {}) {
       });
     }
 
-    // Navigate with domcontentloaded
+    // Navigate with domcontentloaded or networkidle2 if scrollTriggerLazy
     await page.goto(url, {
-      waitUntil: 'domcontentloaded',
+      waitUntil: scrollTriggerLazy ? 'networkidle2' : 'domcontentloaded',
       timeout
     });
 
-    // If requested, fast-scroll to trigger lazy-loaded images/IntersectionObservers
+    // If requested, scroll elements into view to trigger lazy-loaded images/IntersectionObservers
     if (scrollTriggerLazy) {
       await page.evaluate(async () => {
-        const total = document.body.scrollHeight;
-        for (let y = 0; y < total; y += 600) {
-          window.scrollTo(0, y);
-          await new Promise((r) => setTimeout(r, 50));
+        const cards = document.querySelectorAll('.ds-border-b.ds-border-line.ds-p-4, .ci-scorecard-table, [class*="card"]');
+        if (cards && cards.length > 0) {
+          for (const card of cards) {
+            card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            await new Promise((r) => setTimeout(r, 60));
+          }
+        } else {
+          const total = document.body.scrollHeight;
+          for (let y = 0; y < total; y += 400) {
+            window.scrollTo(0, y);
+            await new Promise((r) => setTimeout(r, 60));
+          }
         }
+        await new Promise((r) => setTimeout(r, 500));
         window.scrollTo(0, 0);
       });
     }
 
-    // Wait a brief moment for dynamic React components / image swaps to settle
+    // Wait for dynamic React components / image swaps to settle
     if (waitMs > 0) {
       await new Promise((resolve) => setTimeout(resolve, waitMs));
     }

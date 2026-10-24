@@ -14,15 +14,18 @@ const newsController = {
 
     try {
       const html = await fetchPageHtml('https://www.espncricinfo.com/cricket-news', {
-        waitMs: 1500,
-        scrollTriggerLazy: true
+        waitMs: 2000,
+        scrollTriggerLazy: true,
+        forceBrowser: true
       });
       const $ = cheerio.load(html);
       const newsList = [];
 
       $('.ds-border-b.ds-border-line.ds-p-4').each((i, card) => {
         const $card = $(card);
-        const titleEl = $card.find('p.ds-text-title-s, h2').first();
+        const titleEl = $card.find('p[class*="ds-text-title"], h2, [class*="ds-font-medium"]').filter((_, el) => {
+          return $(el).text().trim().length > 10;
+        }).first();
         const title = titleEl.text().trim();
         if (!title) return;
 
