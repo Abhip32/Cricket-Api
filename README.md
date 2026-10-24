@@ -2,6 +2,18 @@
 
 A high-performance, resilient REST API and web scraper for real-time cricket data, scores, fixtures, news, ICC rankings, and detailed match scorecards.
 
+![Cricket API Live Preview](assets/preview.png)
+
+---
+
+## 📱 Frontend Companion: CricGeek UI
+
+This backend powers **[CricGeek](https://github.com/Abhip32/CricGeek)** — a luxury cricket sports platform built with Next.js 15, React 19, Tailwind CSS, and Framer Motion.
+
+| Live Match Center | Full Innings Scorecard |
+|:---:|:---:|
+| ![Live Match Center](assets/cricgeek-matches.png) | ![Interactive Scorecard](assets/cricgeek-scorecard.png) |
+
 ---
 
 ## ⚡ What Was Fixed & Improved
@@ -46,6 +58,9 @@ npm start
 
 # Development mode with live reload
 npm run dev
+
+# Re-generate documentation preview screenshot
+npm run screenshot
 ```
 
 The API will be available at `http://localhost:8000`.
