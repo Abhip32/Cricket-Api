@@ -52,6 +52,16 @@ The API will be available at `http://localhost:8000`.
 
 ---
 
+## ☁️ Vercel Deployment
+
+This project is optimized for deployment as a Vercel Serverless Function:
+- **Serverless Chromium**: Automatically switches to [`@sparticuz/chromium-min`](https://github.com/Sparticuz/chromium) and `puppeteer-core` in serverless environments (`VERCEL=1`), fitting cleanly within Vercel's 50MB function zip limit without missing shared libraries.
+- **Local Fallback**: Automatically discovers local Chrome / Edge installations when running on local development machines.
+- **Extended Timeout**: Configured with `maxDuration: 60` and `memory: 1024` in [`vercel.json`](file:///c:/Users/abhis/OneDrive/Desktop/Desktop/Cricket-Api/vercel.json) to ensure headless browser launches and page parsing finish comfortably.
+- **Ignored Assets**: Unnecessary heavy files (`.vercelignore`) are omitted from deployment bundles to keep serverless functions lightweight and fast.
+
+---
+
 ## 📖 API Documentation
 
 ### 1. Root & Documentation

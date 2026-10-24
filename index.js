@@ -142,30 +142,38 @@ app.use((err, req, res, next) => {
   });
 });
 
-// Start HTTP Server
-const server = app.listen(PORT, () => {
-  console.log(`Server listening on port :${PORT}`);
-  // Pre-warm browser and sync flags in the background
-  browserService.getBrowser().then(() => {
-    flagService.syncFromCricinfo(browserService).catch((e) => {
-      console.warn('Background flag sync notice:', e.message);
+// Start HTTP Server (when running standalone or locally)
+if (!process.env.VERCEL) {
+  const server = app.listen(PORT, () => {
+    console.log(`Server listening on port :${PORT}`);
+    // Pre-warm browser and sync flags in the background only in standalone mode
+    browserService.getBrowser().then(() => {
+      flagService.syncFromCricinfo(browserService).catch((e) => {
+        console.warn('Background flag sync notice:', e.message);
+      });
+    }).catch((err) => {
+      console.error('Failed to pre-warm browser:', err.message);
     });
-  }).catch((err) => {
-    console.error('Failed to pre-warm browser:', err.message);
   });
-});
 
-// Graceful Shutdown
-const shutdown = async () => {
-  console.log('Shutting down gracefully...');
-  await browserService.closeBrowser();
-  server.close(() => {
-    console.log('Server closed successfully.');
-    process.exit(0);
-  });
+  // Graceful Shutdown
+  const shutdown = async () => {
+    console.log('Shutting down gracefully...');
+    await browserService.closeBrowser();
+    server.close(() => {
+      console.log('Server closed successfully.');
+      process.exit(0);
+    });
+  };
+
+  process.on('SIGINT', shutdown);
+  process.on('SIGTERM', shutdown);
+}
+
+// Export app and Vercel serverless configuration
+app.config = {
+  maxDuration: 60,
+  memory: 1024
 };
-
-process.on('SIGINT', shutdown);
-process.on('SIGTERM', shutdown);
 
 module.exports = app;
