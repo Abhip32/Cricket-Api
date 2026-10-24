@@ -1,3 +1,8 @@
+// Ensure AWS Lambda runtime detection flag is set before requiring @sparticuz/chromium
+if ((process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME) && !process.env.AWS_LAMBDA_JS_RUNTIME) {
+  process.env.AWS_LAMBDA_JS_RUNTIME = 'nodejs20.x';
+}
+
 const fs = require('fs');
 const path = require('path');
 const puppeteer = require('puppeteer-core');
@@ -121,6 +126,29 @@ async function getBrowser() {
 
     if (isServerless) {
       console.log(`[BrowserService] Running in serverless mode. Initializing Chromium via @sparticuz/chromium-min...`);
+
+      // 1. Ensure runtime environment variable is active
+      process.env.AWS_LAMBDA_JS_RUNTIME = process.env.AWS_LAMBDA_JS_RUNTIME || 'nodejs20.x';
+
+      // 2. Ensure LD_LIBRARY_PATH contains AL2023 and AL2 shared library directories
+      const libPaths = ['/tmp/al2023/lib', '/tmp/al2/lib'];
+      const currentLd = process.env.LD_LIBRARY_PATH || '';
+      const currentSet = new Set(currentLd ? currentLd.split(':') : []);
+      for (const lp of libPaths) {
+        currentSet.add(lp);
+      }
+      process.env.LD_LIBRARY_PATH = Array.from(currentSet).join(':');
+
+      // 3. If /tmp/chromium exists from a previous partial run without libraries, clean it up
+      if (fs.existsSync('/tmp/chromium') && !fs.existsSync('/tmp/al2023/lib/libnspr4.so')) {
+        console.log('[BrowserService] Incomplete /tmp/chromium found without libnspr4.so. Cleaning up for fresh extraction...');
+        try {
+          fs.unlinkSync('/tmp/chromium');
+        } catch (e) {
+          // ignore
+        }
+      }
+
       let chromium = null;
       try {
         chromium = require('@sparticuz/chromium-min');
@@ -133,6 +161,18 @@ async function getBrowser() {
       }
 
       executablePath = await chromium.executablePath(CHROMIUM_PACK_URL);
+
+      // 4. Fallback check: if libnspr4.so was not inflated, inflate al2023.tar.br directly
+      if (!fs.existsSync('/tmp/al2023/lib/libnspr4.so') && fs.existsSync('/tmp/chromium-pack/al2023.tar.br')) {
+        try {
+          const lambdafs = require('@sparticuz/chromium-min/build/lambdafs').default;
+          await lambdafs.inflate('/tmp/chromium-pack/al2023.tar.br');
+          console.log('[BrowserService] Manually inflated /tmp/chromium-pack/al2023.tar.br successfully.');
+        } catch (err) {
+          console.warn('[BrowserService] Notice: manual inflate of al2023.tar.br:', err.message);
+        }
+      }
+
       launchArgs = [
         ...chromium.args,
         '--disable-blink-features=AutomationControlled',

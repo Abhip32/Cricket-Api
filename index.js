@@ -1,3 +1,8 @@
+// Ensure AWS Lambda runtime flag is present before requiring @sparticuz/chromium
+if ((process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME) && !process.env.AWS_LAMBDA_JS_RUNTIME) {
+  process.env.AWS_LAMBDA_JS_RUNTIME = 'nodejs20.x';
+}
+
 const express = require('express');
 const cors = require('cors');
 const browserService = require('./services/browserService');

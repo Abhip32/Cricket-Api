@@ -1,5 +1,13 @@
 {
   "version": 2,
+  "env": {
+    "AWS_LAMBDA_JS_RUNTIME": "nodejs20.x"
+  },
+  "build": {
+    "env": {
+      "AWS_LAMBDA_JS_RUNTIME": "nodejs20.x"
+    }
+  },
   "builds": [
     {
       "src": "./index.js",
