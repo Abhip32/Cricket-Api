@@ -14,7 +14,8 @@ const newsController = {
 
     try {
       const html = await fetchPageHtml('https://www.espncricinfo.com/cricket-news', {
-        waitMs: 1500
+        waitMs: 1500,
+        scrollTriggerLazy: true
       });
       const $ = cheerio.load(html);
       const newsList = [];
@@ -64,8 +65,26 @@ const newsController = {
           }
         });
 
-        // Image
-        const image = $card.find('img').attr('src') || null;
+        // Image extraction - resolve data-src, srcset, or src; ignore SVG lazy placeholders
+        let image = null;
+        const img = $card.find('img').first();
+        if (img.length) {
+          const dataSrc = img.attr('data-src') || img.attr('data-default-src');
+          const srcset = img.attr('srcset');
+          const src = img.attr('src');
+
+          let candidate = dataSrc;
+          if (!candidate && srcset) {
+            candidate = srcset.split(',')[0].trim().split(' ')[0];
+          }
+          if (!candidate) {
+            candidate = src;
+          }
+
+          if (candidate && !candidate.includes('lazyimage') && !candidate.startsWith('data:')) {
+            image = candidate.startsWith('http') ? candidate : `https://www.espncricinfo.com${candidate}`;
+          }
+        }
 
         newsList.push({
           title,

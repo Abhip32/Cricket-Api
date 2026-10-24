@@ -2,8 +2,8 @@ const fs = require('fs');
 const path = require('path');
 const cheerio = require('cheerio');
 
-// Fallback generic cricket logo CDN
-const DEFAULT_FLAG = 'https://img1.hscicdn.com/image/upload/f_auto,t_ds_square_w_160,q_50/lsci/db/PICTURES/CMS/381800/381853.png';
+// No fallback to arbitrary country flag - return null if not an official country/team flag
+const DEFAULT_FLAG = null;
 
 // Common abbreviation to full name mapping
 const COMMON_ALIASES = {
@@ -137,14 +137,17 @@ class FlagService {
       }
     }
 
-    // Fuzzy match: e.g. "India Women" -> "India"
+    // Word-aware fuzzy match: e.g. "India Women" -> matches "India", "West Indies A" -> matches "West Indies"
     for (const [k, url] of this.flagsMap.entries()) {
-      if (k.length >= 4 && (key.includes(k) || k.includes(key))) {
-        return url;
+      if (k.length >= 4) {
+        // Check if key starts with country name or exact word boundary
+        if (key.startsWith(k) || key.endsWith(k) || key.split(' ').includes(k)) {
+          return url;
+        }
       }
     }
 
-    return DEFAULT_FLAG;
+    return null;
   }
 
   /**
