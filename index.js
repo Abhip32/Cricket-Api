@@ -1,8 +1,3 @@
-// Ensure AWS Lambda runtime flag is present before requiring @sparticuz/chromium
-if ((process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME) && !process.env.AWS_LAMBDA_JS_RUNTIME) {
-  process.env.AWS_LAMBDA_JS_RUNTIME = 'nodejs20.x';
-}
-
 const express = require('express');
 const cors = require('cors');
 const browserService = require('./services/browserService');
@@ -124,11 +119,24 @@ app.get('/team-flags', (req, res) => {
   return res.status(200).json(flagService.getAllFlags());
 });
 
-// Mount Routes
+// Mount Standard Routes
 app.use(require('./routes/newsRoute'));
 app.use(require('./routes/MatchDataRoute'));
 app.use(require('./routes/rankingRoutes'));
 app.use(require('./routes/ScoreCardRoute'));
+
+// Frontend Compatibility Aliases
+const matchController = require('./controller/MatchDataController');
+const rankingController = require('./controller/rankingController');
+const scoreCardController = require('./controller/scoreCardController');
+
+app.get('/getScoreCard', scoreCardController.getScorecard);
+app.get('/getSchedule', matchController.getUpcomingMatches);
+app.get('/getschdule', matchController.getUpcomingMatches);
+app.get('/getTeamRankings', rankingController.getICCtables);
+app.get('/getBattingRankings', rankingController.getPlayersTable);
+app.get('/getBowlingRankings', rankingController.getPlayersTable);
+app.get('/getAllRounderRankings', rankingController.getPlayersTable);
 
 // 404 Handler
 app.use((req, res) => {
@@ -147,38 +155,30 @@ app.use((err, req, res, next) => {
   });
 });
 
-// Start HTTP Server (when running standalone or locally)
-if (!process.env.VERCEL) {
-  const server = app.listen(PORT, () => {
-    console.log(`Server listening on port :${PORT}`);
-    // Pre-warm browser and sync flags in the background only in standalone mode
-    browserService.getBrowser().then(() => {
-      flagService.syncFromCricinfo(browserService).catch((e) => {
-        console.warn('Background flag sync notice:', e.message);
-      });
-    }).catch((err) => {
-      console.error('Failed to pre-warm browser:', err.message);
+// Start HTTP Server
+const server = app.listen(PORT, () => {
+  console.log(`Server listening on port :${PORT}`);
+  // Pre-warm browser and sync flags in the background
+  browserService.getBrowser().then(() => {
+    flagService.syncFromCricinfo(browserService).catch((e) => {
+      console.warn('Background flag sync notice:', e.message);
     });
+  }).catch((err) => {
+    console.error('Failed to pre-warm browser:', err.message);
   });
+});
 
-  // Graceful Shutdown
-  const shutdown = async () => {
-    console.log('Shutting down gracefully...');
-    await browserService.closeBrowser();
-    server.close(() => {
-      console.log('Server closed successfully.');
-      process.exit(0);
-    });
-  };
-
-  process.on('SIGINT', shutdown);
-  process.on('SIGTERM', shutdown);
-}
-
-// Export app and Vercel serverless configuration
-app.config = {
-  maxDuration: 60,
-  memory: 1024
+// Graceful Shutdown
+const shutdown = async () => {
+  console.log('Shutting down gracefully...');
+  await browserService.closeBrowser();
+  server.close(() => {
+    console.log('Server closed successfully.');
+    process.exit(0);
+  });
 };
+
+process.on('SIGINT', shutdown);
+process.on('SIGTERM', shutdown);
 
 module.exports = app;

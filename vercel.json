@@ -8,6 +8,12 @@
       "AWS_LAMBDA_JS_RUNTIME": "nodejs20.x"
     }
   },
+  "functions": {
+    "index.js": {
+      "maxDuration": 60,
+      "memory": 1024
+    }
+  },
   "builds": [
     {
       "src": "./index.js",

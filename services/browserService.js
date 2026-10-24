@@ -23,6 +23,50 @@ const CHROMIUM_PACK_URL = process.env.CHROMIUM_PACK_URL ||
   'https://github.com/Sparticuz/chromium/releases/download/v123.0.1/chromium-v123.0.1-pack.tar';
 
 /**
+ * Fast HTTP fetch with realistic desktop browser headers.
+ * ESPN Cricinfo uses Next.js server-side rendering, so full HTML markup with
+ * match cards, series data, team scores, and tables is returned in ~200-600ms.
+ */
+async function fetchViaHttp(url, timeoutMs = 8000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const res = await fetch(url, {
+      signal: controller.signal,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Cache-Control': 'no-cache',
+        'Pragma': 'no-cache',
+        'Sec-Ch-Ua': '"Chromium";v="123", "Not:A-Brand";v="8"',
+        'Sec-Ch-Ua-Mobile': '?0',
+        'Sec-Ch-Ua-Platform': '"Windows"',
+        'Sec-Fetch-Dest': 'document',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Site': 'none',
+        'Sec-Fetch-User': '?1',
+        'Upgrade-Insecure-Requests': '1'
+      }
+    });
+
+    if (res.ok) {
+      const html = await res.text();
+      // Ensure we received valid HTML content and not an anti-bot challenge
+      if (html && html.includes('<!DOCTYPE html') && !html.includes('<title>Access Denied</title>')) {
+        return html;
+      }
+    }
+    return null;
+  } catch (err) {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
  * Locates Chrome / Edge on local machines across Windows, macOS, and Linux
  */
 function getLocalExecutablePath() {
@@ -207,16 +251,31 @@ async function getBrowser() {
 
 /**
  * Loads a URL and returns its full HTML content.
- * Optimizes speed by blocking media and fonts while preserving HTML markup.
+ * 1. Executes ultra-fast direct HTTP fetch first (~200-600ms).
+ * 2. Transparently falls back to headless browser if dynamic DOM execution is requested or required.
  */
 async function fetchPageHtml(url, options = {}) {
   const {
     timeout = 25000,
     waitMs = 1200,
     blockMedia = true,
-    scrollTriggerLazy = false
+    scrollTriggerLazy = false,
+    forceBrowser = false
   } = options;
 
+  // 1. Try ultra-fast HTTP fetch first (~200-600ms)
+  if (!scrollTriggerLazy && !forceBrowser) {
+    try {
+      const fastHtml = await fetchViaHttp(url, 6000);
+      if (fastHtml) {
+        return fastHtml;
+      }
+    } catch (e) {
+      // Proceed to browser fallback
+    }
+  }
+
+  // 2. Headless Browser fallback if direct fetch fails or scroll interaction is needed
   let browser = await getBrowser();
   let page = null;
 
@@ -305,5 +364,6 @@ async function closeBrowser() {
 module.exports = {
   getBrowser,
   fetchPageHtml,
+  fetchViaHttp,
   closeBrowser
 };
