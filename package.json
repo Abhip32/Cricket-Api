@@ -1,12 +1,13 @@
 {
-  "name": "webscrapper",
-  "version": "1.0.0",
-  "description": "",
+  "name": "cricket-api",
+  "version": "2.0.0",
+  "description": "High-performance Cricket Scraper & API for Live Scores, Match Results, Upcoming Fixtures, News, ICC Rankings, and Scorecards",
   "main": "index.js",
   "scripts": {
-    "start": "nodemon index.js"
+    "start": "node index.js",
+    "dev": "nodemon index.js"
   },
-  "author": "",
+  "author": "Abhip32",
   "license": "ISC",
   "dependencies": {
     "axios": "^0.27.2",

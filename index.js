@@ -1,133 +1,171 @@
-const PORT=process.env.PORT || 8000;
 const express = require('express');
-const cors = require("cors");
-const puppeteer = require('puppeteer');
+const cors = require('cors');
+const browserService = require('./services/browserService');
+const cacheService = require('./services/cacheService');
+const flagService = require('./services/flagService');
 
-// Advanced in-memory cache with cleanup
-const cache = new Map();
-const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
-const MAX_CACHE_SIZE = 100; // Maximum cache entries
+const PORT = process.env.PORT || 8000;
+const app = express();
 
-// Cache middleware
-function getCachedData(key) {
-  const cached = cache.get(key);
-  if (cached && Date.now() - cached.timestamp < CACHE_DURATION) {
-    return cached.data;
-  }
-  // Remove expired entries
-  if (cached) {
-    cache.delete(key);
-  }
-  return null;
-}
+app.use(cors());
+app.use(express.json());
 
-function setCachedData(key, data) {
-  // Clean up old entries if cache is getting too large
-  if (cache.size >= MAX_CACHE_SIZE) {
-    const oldestKey = cache.keys().next().value;
-    cache.delete(oldestKey);
-  }
+// Backward compatibility globals if needed
+global.getBrowser = browserService.getBrowser;
+global.closeBrowser = browserService.closeBrowser;
+global.getCachedData = (key) => cacheService.get(key);
+global.setCachedData = (key, data, ttl) => cacheService.set(key, data, ttl);
+global.flagService = flagService;
 
-  cache.set(key, {
-    data,
-    timestamp: Date.now()
-  });
-}
-
-// Periodic cache cleanup (every 10 minutes)
-setInterval(() => {
-  const now = Date.now();
-  for (const [key, value] of cache.entries()) {
-    if (now - value.timestamp > CACHE_DURATION) {
-      cache.delete(key);
+// Root endpoint with comprehensive documentation of all endpoints
+app.get('/', (req, res) => {
+  res.status(200).json({
+    message: 'Cricket API Made by Abhip32!',
+    status: 'online',
+    version: '2.0.0',
+    documentation: {
+      liveMatches: {
+        endpoint: '/getLive',
+        method: 'GET',
+        description: 'Returns real-time live cricket matches, current scores, overs, targets, series information, and dynamic team flags.',
+        cacheTTL: '45 seconds',
+        parameters: {
+          refresh: 'Optional boolean (e.g. ?refresh=true) to bypass cache'
+        }
+      },
+      recentMatches: {
+        endpoint: '/getRecent',
+        method: 'GET',
+        description: 'Returns recently completed cricket matches and match results across series with dynamic team flags.',
+        cacheTTL: '5 minutes',
+        parameters: {
+          refresh: 'Optional boolean (e.g. ?refresh=true) to bypass cache'
+        }
+      },
+      upcomingMatches: {
+        endpoint: '/getUpcoming',
+        method: 'GET',
+        description: 'Returns upcoming scheduled matches, fixtures, and dynamic team details with flags.',
+        cacheTTL: '10 minutes',
+        parameters: {
+          date: 'Optional date filter in DD-MM-YYYY or YYYY-MM-DD (e.g. ?date=25-10-2026)',
+          refresh: 'Optional boolean (e.g. ?refresh=true) to bypass cache'
+        }
+      },
+      news: {
+        endpoint: '/getNews',
+        method: 'GET',
+        description: 'Returns latest cricket news articles with titles, descriptions, dates, authors, and images.',
+        cacheTTL: '10 minutes',
+        parameters: {
+          refresh: 'Optional boolean (e.g. ?refresh=true) to bypass cache'
+        }
+      },
+      teamRankings: {
+        endpoint: '/rankings/icc-team-ranking',
+        method: 'GET',
+        description: 'Returns official ICC Men & Women team rankings across Test, ODI, and T20 formats with dynamic team logos.',
+        cacheTTL: '1 hour',
+        parameters: {
+          refresh: 'Optional boolean (e.g. ?refresh=true) to bypass cache'
+        }
+      },
+      playerRankings: {
+        endpoint: '/rankings/icc-player-ranking',
+        method: 'GET',
+        description: 'Returns official ICC player rankings across batting, bowling, and all-rounders in Test, ODI, and T20 formats.',
+        cacheTTL: '1 hour',
+        parameters: {
+          refresh: 'Optional boolean (e.g. ?refresh=true) to bypass cache'
+        }
+      },
+      scorecard: {
+        endpoint: '/getScorecard',
+        method: 'GET',
+        description: 'Returns detailed full match scorecard including batting & bowling tables, innings breakdowns, dynamic team logos, and summary.',
+        cacheTTL: '45 seconds (live) / 30 minutes (completed)',
+        parameters: {
+          url: 'Optional ESPN Cricinfo match scorecard URL. Defaults to the latest active match.',
+          refresh: 'Optional boolean (e.g. ?refresh=true) to bypass cache'
+        }
+      },
+      teamFlags: {
+        endpoint: '/team-flags',
+        method: 'GET',
+        description: 'Returns dynamically resolved cricket team logos and flags dictionary. Can also query a single team via ?team=India.',
+        parameters: {
+          team: 'Optional team name (e.g. ?team=India or ?team=NZ)'
+        }
+      }
     }
-  }
-  console.log(`Cache cleanup completed. Current cache size: ${cache.size}`);
-}, 10 * 60 * 1000);
+  });
+});
 
-// Global browser instance - accessible by all controllers
-let browserInstance = null;
+// Health check endpoint
+app.get('/health', (req, res) => {
+  res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
+});
 
-// Initialize browser on server start with performance optimizations
-const initBrowser = async () => {
-  if (!browserInstance) {
-    browserInstance = await puppeteer.launch({
-      headless: "new",
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-accelerated-2d-canvas',
-        '--no-first-run',
-        '--no-zygote',
-        '--disable-gpu',
-        '--memory-pressure-off',
-        '--max_old_space_size=4096'
-      ]
+// Dynamic Team Flags registry endpoint
+app.get('/team-flags', (req, res) => {
+  const teamQuery = req.query.team ? String(req.query.team).trim() : '';
+  if (teamQuery) {
+    const flag = flagService.getFlag(teamQuery);
+    return res.status(200).json({
+      team: teamQuery,
+      flag
     });
   }
-  return browserInstance;
-};
-
-// Get browser instance (for controllers to use)
-const getBrowser = () => {
-  if (!browserInstance) {
-    throw new Error('Browser not initialized. Call initBrowser() first.');
-  }
-  return browserInstance;
-};
-
-// Cleanup function
-const closeBrowser = async () => {
-  if (browserInstance) {
-    await browserInstance.close();
-    browserInstance = null;
-  }
-};
-
-// Make browser and cache functions globally available
-global.getBrowser = getBrowser;
-global.closeBrowser = closeBrowser;
-global.getCachedData = getCachedData;
-global.setCachedData = setCachedData;
-
-const app = express();
-app.use(cors());
-
-// Initialize browser on server start
-initBrowser().then(() => {
-  console.log('Browser initialized successfully');
-}).catch(err => {
-  console.error('Failed to initialize browser:', err);
+  return res.status(200).json(flagService.getAllFlags());
 });
 
-app.get('/',(req,res)=>{
-    res.json("Cricket API Made by Abhip32!")
-})
+// Mount Routes
+app.use(require('./routes/newsRoute'));
+app.use(require('./routes/MatchDataRoute'));
+app.use(require('./routes/rankingRoutes'));
+app.use(require('./routes/ScoreCardRoute'));
 
-
-app.use(require("./routes/newsRoute"))
-app.use(require("./routes/MatchDataRoute"));
-app.use(require("./routes/rankingRoutes"));
-app.use(require("./routes/ScoreCardRoute"));
-
-const server = app.listen(PORT, ()=>console.log('listening on port :'+PORT));
-
-// Graceful shutdown
-process.on('SIGINT', async () => {
-  console.log('Shutting down gracefully...');
-  await closeBrowser();
-  server.close(() => {
-    console.log('Server closed');
-    process.exit(0);
+// 404 Handler
+app.use((req, res) => {
+  res.status(404).json({
+    error: 'Route not found',
+    message: `Cannot ${req.method} ${req.url}. Visit / for available endpoints.`
   });
 });
 
-process.on('SIGTERM', async () => {
-  console.log('Shutting down gracefully...');
-  await closeBrowser();
-  server.close(() => {
-    console.log('Server closed');
-    process.exit(0);
+// Global Error Handler
+app.use((err, req, res, next) => {
+  console.error('Unhandled server error:', err);
+  res.status(500).json({
+    error: 'Internal Server Error',
+    message: err.message
   });
 });
+
+// Start HTTP Server
+const server = app.listen(PORT, () => {
+  console.log(`Server listening on port :${PORT}`);
+  // Pre-warm browser and sync flags in the background
+  browserService.getBrowser().then(() => {
+    flagService.syncFromCricinfo(browserService).catch((e) => {
+      console.warn('Background flag sync notice:', e.message);
+    });
+  }).catch((err) => {
+    console.error('Failed to pre-warm browser:', err.message);
+  });
+});
+
+// Graceful Shutdown
+const shutdown = async () => {
+  console.log('Shutting down gracefully...');
+  await browserService.closeBrowser();
+  server.close(() => {
+    console.log('Server closed successfully.');
+    process.exit(0);
+  });
+};
+
+process.on('SIGINT', shutdown);
+process.on('SIGTERM', shutdown);
+
+module.exports = app;

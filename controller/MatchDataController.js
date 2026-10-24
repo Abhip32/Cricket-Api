@@ -1,342 +1,277 @@
 const cheerio = require('cheerio');
+const { fetchPageHtml } = require('../services/browserService');
+const cacheService = require('../services/cacheService');
+const flagService = require('../services/flagService');
 
+/**
+ * Helper to extract match cards from Cricinfo series blocks (used for live and recent matches)
+ */
+function extractSeriesMatches(html) {
+  const $ = cheerio.load(html);
+  const response = [];
 
-async function autoScroll(page) {
-  await page.evaluate(async () => {
-    await new Promise((resolve) => {
-      let totalHeight = 0;
-      const distance = 500; // px per scroll
-      const timer = setInterval(() => {
-        const scrollHeight = document.body.scrollHeight;
-        window.scrollBy(0, distance);
-        totalHeight += distance;
+  $('.ds-w-full.ds-bg-fill-content-prime').each((i, seriesEl) => {
+    const seriesTitle = $(seriesEl)
+      .find('h2 span.ds-text-title-xs, h2')
+      .first()
+      .text()
+      .trim();
 
-        if (totalHeight >= scrollHeight) {
-          clearInterval(timer);
-          resolve();
+    if (!seriesTitle) return;
+
+    const matches = [];
+
+    // Match cards inside series
+    $(seriesEl)
+      .find('.ds-border-b.ds-border-line')
+      .each((j, matchEl) => {
+        // Ensure this is a match card containing teams
+        if ($(matchEl).find('.ci-team-score').length === 0) return;
+
+        const match = {};
+
+        // Link
+        const linkEl = $(matchEl)
+          .find('a[href*="/live-cricket-score"], a[href*="/full-scorecard"], a.ds-no-tap-higlight')
+          .first();
+        let link = linkEl.attr('href') || null;
+        if (link && !link.startsWith('http')) {
+          link = `https://www.espncricinfo.com${link}`;
         }
-      }, 100); // wait 100ms per scroll
-    });
+        match.link = link;
+
+        // Status (e.g. RESULT, LIVE, scheduled time)
+        let status = $(matchEl)
+          .find('span.ds-uppercase, span[class*="ds-text-tight-xs"][class*="ds-uppercase"]')
+          .first()
+          .text()
+          .trim();
+
+        // Fallback to embedded schema.org JSON if status is empty
+        if (!status) {
+          const ldScript = $(matchEl).find('script[type="application/ld+json"]').first();
+          if (ldScript.length) {
+            try {
+              const ld = JSON.parse(ldScript.text());
+              status = ld.broadcastOfEvent?.eventStatus || ld.eventStatus || '';
+            } catch (e) {
+              // ignore
+            }
+          }
+        }
+        match.status = status;
+
+        // Match info
+        match.matchInfo = $(matchEl)
+          .find('.ds-text-tight-xs.ds-text-typo-mid3')
+          .first()
+          .text()
+          .trim();
+
+        // Teams
+        match.teams = [];
+        $(matchEl).find('.ci-team-score').each((k, teamEl) => {
+          const team = {};
+
+          team.name = $(teamEl)
+            .find('p.ds-text-tight-m, p')
+            .first()
+            .text()
+            .trim();
+
+          // Dynamic flag extraction with fallback to dynamic registry
+          team.flag = flagService.extractFlagFromElement($, teamEl, team.name);
+
+          const metaText = $(teamEl)
+            .find('span.ds-text-compact-xs, span[class*="ds-mr-0"]')
+            .text()
+            .trim();
+
+          let overs = '';
+          let target = '';
+          if (metaText) {
+            const cleaned = metaText.replace(/[()]/g, '');
+            cleaned.split(',').forEach((part) => {
+              if (part.includes('ov')) overs = part.trim();
+              if (part.includes('T:')) target = part.trim();
+            });
+          }
+          team.overs = overs;
+          team.target = target;
+
+          const score = $(teamEl).find('strong').text().trim();
+          team.score = score;
+          team.fullScore = metaText ? `${score} ${metaText}`.trim() : score;
+
+          match.teams.push(team);
+        });
+
+        // Result / preview text
+        match.result = $(matchEl)
+          .find('p.ds-text-tight-s.ds-font-medium, p.ds-text-tight-s')
+          .first()
+          .text()
+          .trim();
+
+        if (match.teams.length >= 2) {
+          matches.push(match);
+        }
+      });
+
+    if (matches.length > 0) {
+      response.push({
+        series: seriesTitle,
+        matches
+      });
+    }
   });
+
+  return response;
 }
 
 const MatchDataController = {
-  getLiveMatches :async (req, res) => {
-  let page;
-
-  try {
-    const browser = global.getBrowser();
-    page = await browser.newPage();
-
-    await page.setUserAgent(
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36'
-    );
-
-    await page.goto(
-      'https://www.espncricinfo.com/live-cricket-score',
-      { waitUntil: 'networkidle2', timeout: 0 }
-    );
-    // Scroll to load all lazy content
-    await autoScroll(page);
-
-    const html = await page.content();
-    const $ = cheerio.load(html);
-
-    const response = [];
-
-    // 👉 Each SERIES block
-    $('.ds-w-full.ds-bg-fill-content-prime').each((i, seriesEl) => {
-      const series = {};
-
-      // Series name
-      series.series = $(seriesEl)
-        .find('h2 span.ds-text-title-xs')
-        .first()
-        .text()
-        .trim();
-
-      series.matches = [];
-
-      // 👉 Each MATCH card inside series
-      $(seriesEl)
-        .find('.ds-border-b.ds-border-line.ds-w-full')
-        .each((j, matchEl) => {
-          const match = {};
-
-          // Match link
-          const linkEl = $(matchEl).find('a.ds-no-tap-higlight').first();
-          match.link = linkEl.attr('href')
-            ? `https://www.espncricinfo.com${linkEl.attr('href')}`
-            : null;
-
-          // Status (RESULT / LIVE / Today 7:30 PM)
-          match.status = $(matchEl)
-            .find('.ds-text-tight-xs.ds-font-bold.ds-uppercase')
-            .first()
-            .text()
-            .trim();
-
-          // Match info
-          match.matchInfo = $(matchEl)
-            .find('.ds-text-tight-xs.ds-text-typo-mid3')
-            .first()
-            .text()
-            .trim();
-
-          // Teams
-          match.teams = [];
-
-          $(matchEl).find('.ci-team-score').each((k, teamEl) => {
-            const team = {};
-
-            team.name = $(teamEl)
-              .find('p.ds-text-tight-m')
-              .text()
-              .trim();
-
-            team.flag = $(teamEl).find('img').attr('src') || null;
-
-            const metaText = $(teamEl)
-              .find('span.ds-text-compact-xs')
-              .text()
-              .trim(); // (19/20 ov, T:196)
-
-            if (metaText) {
-              const cleaned = metaText.replace(/[()]/g, '');
-              cleaned.split(',').forEach(part => {
-                if (part.includes('ov')) team.overs = part.trim();
-                if (part.includes('T:')) team.target = part.trim();
-              });
-            }
-
-            team.score = $(teamEl)
-              .find('strong')
-              .text()
-              .trim();
-
-            team.fullScore = metaText
-              ? `${team.score} ${metaText}`
-              : team.score;
-
-            match.teams.push(team);
-          });
-
-          // Result / Preview text
-          match.result = $(matchEl)
-            .find('p.ds-text-tight-s.ds-font-medium')
-            .text()
-            .trim();
-
-          if (match.teams.length >= 2) {
-            series.matches.push(match);
-          }
-        });
-
-      if (series.matches.length > 0) {
-        response.push(series);
+  getLiveMatches: async (req, res) => {
+    const cacheKey = 'live_matches';
+    if (!cacheService.isBypassed(req)) {
+      const cached = cacheService.get(cacheKey);
+      if (cached) {
+        return res.status(200).json(cached);
       }
-    });
+    }
 
-    res.status(200).json(response);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Scraping failed' });
-  } finally {
-    if (page) await page.close();
-  }
-},
+    try {
+      const html = await fetchPageHtml('https://www.espncricinfo.com/live-cricket-score', {
+        waitMs: 1500
+      });
+      const data = extractSeriesMatches(html);
 
+      // Cache live matches for 45 seconds
+      cacheService.set(cacheKey, data, 45 * 1000);
 
-  getRecentMatches : async (req, res) => {
-  let page;
-
-  try {
-    const browser = global.getBrowser();
-    page = await browser.newPage();
-
-    await page.setUserAgent(
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36'
-    );
-
-    await page.goto(
-      'https://www.espncricinfo.com/live-cricket-match-results',
-      { waitUntil: 'networkidle2', timeout: 0 }
-    );
-    // Scroll to load all lazy content
-    await autoScroll(page);
-
-    const html = await page.content();
-    const $ = cheerio.load(html);
-
-    const response = [];
-
-    // 👉 Each SERIES block
-    $('.ds-w-full.ds-bg-fill-content-prime').each((i, seriesEl) => {
-      const series = {};
-
-      // Series name
-      series.series = $(seriesEl)
-        .find('h2 span.ds-text-title-xs')
-        .first()
-        .text()
-        .trim();
-
-      series.matches = [];
-
-      // 👉 Each MATCH card inside series
-      $(seriesEl)
-        .find('.ds-border-b.ds-border-line.ds-w-full')
-        .each((j, matchEl) => {
-          const match = {};
-
-          // Match link
-          const linkEl = $(matchEl).find('a.ds-no-tap-higlight').first();
-          match.link = linkEl.attr('href')
-            ? `https://www.espncricinfo.com${linkEl.attr('href')}`
-            : null;
-
-          // Status (RESULT / LIVE / Today 7:30 PM)
-          match.status = $(matchEl)
-            .find('.ds-text-tight-xs.ds-font-bold.ds-uppercase')
-            .first()
-            .text()
-            .trim();
-
-          // Match info
-          match.matchInfo = $(matchEl)
-            .find('.ds-text-tight-xs.ds-text-typo-mid3')
-            .first()
-            .text()
-            .trim();
-
-          // Teams
-          match.teams = [];
-
-          $(matchEl).find('.ci-team-score').each((k, teamEl) => {
-            const team = {};
-
-            team.name = $(teamEl)
-              .find('p.ds-text-tight-m')
-              .text()
-              .trim();
-
-            team.flag = $(teamEl).find('img').attr('src') || null;
-
-            const metaText = $(teamEl)
-              .find('span.ds-text-compact-xs')
-              .text()
-              .trim(); // (19/20 ov, T:196)
-
-            if (metaText) {
-              const cleaned = metaText.replace(/[()]/g, '');
-              cleaned.split(',').forEach(part => {
-                if (part.includes('ov')) team.overs = part.trim();
-                if (part.includes('T:')) team.target = part.trim();
-              });
-            }
-
-            team.score = $(teamEl)
-              .find('strong')
-              .text()
-              .trim();
-
-            team.fullScore = metaText
-              ? `${team.score} ${metaText}`
-              : team.score;
-
-            match.teams.push(team);
-          });
-
-          // Result / Preview text
-          match.result = $(matchEl)
-            .find('p.ds-text-tight-s.ds-font-medium')
-            .text()
-            .trim();
-
-          if (match.teams.length >= 2) {
-            series.matches.push(match);
-          }
-        });
-
-      if (series.matches.length > 0) {
-        response.push(series);
-      }
-    });
-
-    res.status(200).json(response);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Scraping failed' });
-  } finally {
-    if (page) await page.close();
-  }
-
-
+      res.status(200).json(data);
+    } catch (err) {
+      console.error('getLiveMatches error:', err.message);
+      res.status(500).json({ error: 'Scraping failed', message: err.message });
+    }
   },
 
-getUpcomingMatches: async (req, res) => {
-  const date = req.query.date;
-  let page;
-  try {
-    const browser = global.getBrowser();
-    page = await browser.newPage();
+  getRecentMatches: async (req, res) => {
+    const cacheKey = 'recent_matches';
+    if (!cacheService.isBypassed(req)) {
+      const cached = cacheService.get(cacheKey);
+      if (cached) {
+        return res.status(200).json(cached);
+      }
+    }
 
-    await page.setUserAgent(
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36'
-    );
-
-    await page.goto(
-      'https://www.espncricinfo.com/live-cricket-match-schedule-fixtures?date=' + date,
-      { waitUntil: 'networkidle2', timeout: 0 }
-    );
-
-    await autoScroll(page); // scroll to load all lazy content
-
-    const html = await page.content();
-    const $ = cheerio.load(html);
-
-    const response = [];
-
-    $('.ds-mb-6').each((i, dateBlock) => {
-      const date = $(dateBlock).find('span.ds-text-tight-s').first().text().trim();
-
-      // loop over actual match cards
-      $(dateBlock).find('div.ds-bg-fill-content-prime').each((j, cardEl) => {
-        const teams = $(cardEl).find('p.ds-text-compact-s').first().text().trim();
-        if (!teams) return; // skip empty cards
-
-        const venueInfoFull = $(cardEl).find('div.ds-text-tight-xs').first().text().trim();
-        const venueParts = venueInfoFull.split(',');
-        const venueInfo = venueParts.slice(1).join(',').trim(); // skip match number
-
-        const seriesName = $(cardEl).find('a.ds-inline-flex span').first().text().trim();
-        const startTime = $(cardEl).find('time').first().text().trim();
-
-        const linkEl = $(cardEl).find('a').first();
-        const link = linkEl.attr('href') ? `https://www.espncricinfo.com${linkEl.attr('href')}` : null;
-
-        response.push({
-          date,
-          teams,
-          venueInfo,
-          seriesName,
-          startTime,
-          link
-        });
+    try {
+      const html = await fetchPageHtml('https://www.espncricinfo.com/live-cricket-match-results', {
+        waitMs: 1500
       });
-    });
+      const data = extractSeriesMatches(html);
 
-    res.status(200).json(response);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Scraping failed' });
-  } finally {
-    if (page) await page.close();
+      // Cache recent matches for 5 minutes
+      cacheService.set(cacheKey, data, 5 * 60 * 1000);
+
+      res.status(200).json(data);
+    } catch (err) {
+      console.error('getRecentMatches error:', err.message);
+      res.status(500).json({ error: 'Scraping failed', message: err.message });
+    }
+  },
+
+  getUpcomingMatches: async (req, res) => {
+    let rawDate = req.query.date ? String(req.query.date).trim() : '';
+    let formattedDate = '';
+
+    if (rawDate && rawDate !== 'undefined') {
+      // If provided as YYYY-MM-DD, convert to DD-MM-YYYY
+      if (/^\d{4}-\d{2}-\d{2}$/.test(rawDate)) {
+        const [year, month, day] = rawDate.split('-');
+        formattedDate = `${day}-${month}-${year}`;
+      } else if (/^\d{2}-\d{2}-\d{4}$/.test(rawDate)) {
+        formattedDate = rawDate;
+      }
+    }
+
+    const cacheKey = `upcoming_matches_${formattedDate || 'all'}`;
+    if (!cacheService.isBypassed(req)) {
+      const cached = cacheService.get(cacheKey);
+      if (cached) {
+        return res.status(200).json(cached);
+      }
+    }
+
+    try {
+      const url = formattedDate
+        ? `https://www.espncricinfo.com/live-cricket-match-schedule-fixtures?date=${formattedDate}`
+        : 'https://www.espncricinfo.com/live-cricket-match-schedule-fixtures';
+
+      const html = await fetchPageHtml(url, { waitMs: 1500 });
+      const $ = cheerio.load(html);
+      const response = [];
+
+      $('.ds-mb-6').each((i, dateBlock) => {
+        const date = $(dateBlock).find('span[class*="ds-text-tight-s"]').first().text().trim();
+
+        $(dateBlock)
+          .find('div.ds-bg-fill-content-prime')
+          .each((j, cardEl) => {
+            const teamsEl = $(cardEl).find('p.ds-text-compact-s').first();
+            let teams = teamsEl.clone().children().remove().end().text().trim();
+            if (!teams) teams = teamsEl.text().trim();
+            if (!teams) return;
+
+            // Dynamically resolve team details and flags
+            const teamParts = teams.split(/\s+(?:vs|v)\s+/i);
+            const teamDetails = teamParts.map((tName) => {
+              const cleanName = tName.trim();
+              return {
+                name: cleanName,
+                flag: flagService.getFlag(cleanName)
+              };
+            });
+
+            const venueInfoFull = $(cardEl).find('div.ds-text-tight-xs').first().text().trim();
+            const venueParts = venueInfoFull.split(',');
+            const venueInfo = venueParts.slice(1).join(',').trim() || venueParts[0] || '';
+
+            // Series Name
+            const seriesLink = $(cardEl).find('a[href*="/series/"]').last();
+            const seriesName = seriesLink.attr('title') || seriesLink.text().trim();
+
+            // Start Time
+            const timeEl = $(cardEl).find('time').first();
+            const startTime = timeEl.text().trim() || $(cardEl).find('span[class*="ds-text-compact-xs"]').first().text().trim();
+
+            // Link
+            const linkEl = $(cardEl).find('a[href*="/live-cricket-score"], a[href*="/match/"]').first();
+            let link = linkEl.attr('href') || null;
+            if (link && !link.startsWith('http')) {
+              link = `https://www.espncricinfo.com${link}`;
+            }
+
+            response.push({
+              date,
+              teams,
+              teamDetails,
+              venueInfo,
+              seriesName,
+              startTime,
+              link
+            });
+          });
+      });
+
+      // Cache upcoming matches for 10 minutes
+      cacheService.set(cacheKey, response, 10 * 60 * 1000);
+
+      res.status(200).json(response);
+    } catch (err) {
+      console.error('getUpcomingMatches error:', err.message);
+      res.status(500).json({ error: 'Scraping failed', message: err.message });
+    }
   }
-}
-
-
-
 };
 
 module.exports = MatchDataController;
