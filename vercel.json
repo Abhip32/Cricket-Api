@@ -3,31 +3,16 @@
   "env": {
     "AWS_LAMBDA_JS_RUNTIME": "nodejs20.x"
   },
-  "build": {
-    "env": {
-      "AWS_LAMBDA_JS_RUNTIME": "nodejs20.x"
-    }
-  },
   "functions": {
     "index.js": {
       "maxDuration": 60,
       "memory": 1024
     }
   },
-  "builds": [
+  "rewrites": [
     {
-      "src": "./index.js",
-      "use": "@vercel/node",
-      "config": {
-        "maxDuration": 60,
-        "memory": 1024
-      }
-    }
-  ],
-  "routes": [
-    {
-      "src": "/(.*)",
-      "dest": "/"
+      "source": "/(.*)",
+      "destination": "/index.js"
     }
   ]
 }
