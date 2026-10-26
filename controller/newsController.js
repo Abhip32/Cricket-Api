@@ -2,6 +2,49 @@ const cheerio = require('cheerio');
 const { fetchPageHtml } = require('../services/browserService');
 const cacheService = require('../services/cacheService');
 
+/**
+ * Ultra-fast RSS XML parser (< 300ms)
+ * Immune to Akamai 403 blocks on Vercel
+ */
+async function fetchRssNews() {
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 4000);
+    const res = await fetch('https://www.espncricinfo.com/rss/content/story/feeds/0.xml', {
+      signal: controller.signal,
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
+    });
+    clearTimeout(timer);
+    if (!res.ok) return null;
+    const xml = await res.text();
+    const $ = cheerio.load(xml, { xmlMode: true });
+    const newsList = [];
+
+    $('item').each((_, el) => {
+      const title = $(el).find('title').text().trim();
+      if (!title) return;
+      const link = $(el).find('link').text().trim() || $(el).find('guid').text().trim();
+      const description = $(el).find('description').text().trim();
+      const pubDate = $(el).find('pubDate').text().trim();
+      const image = $(el).find('enclosure').attr('url') || $(el).find('coverImages').text().trim() || null;
+      const author = $(el).find('dc\\:creator, author').text().trim() || 'ESPNcricinfo staff';
+
+      newsList.push({
+        title,
+        link,
+        description,
+        image,
+        date: pubDate,
+        author
+      });
+    });
+
+    return newsList.length > 0 ? newsList : null;
+  } catch (e) {
+    return null;
+  }
+}
+
 const newsController = {
   getNews: async (req, res) => {
     const cacheKey = 'cricket_news';
@@ -13,6 +56,14 @@ const newsController = {
     }
 
     try {
+      // 1. Try ultra-fast RSS news feed first (~300ms, immune to Akamai 403 on Vercel)
+      const rssNews = await fetchRssNews();
+      if (rssNews && rssNews.length > 0) {
+        cacheService.set(cacheKey, rssNews, 10 * 60 * 1000);
+        return res.status(200).json(rssNews);
+      }
+
+      // 2. Fall back to HTML scraping
       const html = await fetchPageHtml('https://www.espncricinfo.com/cricket-news');
       const $ = cheerio.load(html);
       const newsList = [];

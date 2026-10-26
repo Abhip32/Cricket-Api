@@ -4,6 +4,71 @@ const cacheService = require('../services/cacheService');
 const flagService = require('../services/flagService');
 
 /**
+ * Ultra-fast direct ESPN Scoreboard Header API (< 100ms)
+ * Immune to Akamai 403 blocks on Vercel / Cloud lambdas.
+ */
+async function fetchEspnLiveMatches() {
+  try {
+    const url = 'https://site.web.api.espn.com/apis/personalized/v2/scoreboard/header?sport=cricket&region=in&tz=Asia/Kolkata';
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 4000);
+    const res = await fetch(url, {
+      signal: controller.signal,
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
+    });
+    clearTimeout(timer);
+    if (!res.ok) return null;
+    const json = await res.json();
+    const leagues = json.sports?.[0]?.leagues || [];
+    const seriesList = [];
+
+    for (const l of leagues) {
+      const seriesTitle = l.name || 'Cricket Series';
+      const matches = [];
+
+      for (const ev of l.events || []) {
+        const state = ev.fullStatus?.type?.state;
+        if (state === 'in' || ev.status === 'live' || ev.fullStatus?.type?.name === 'STATUS_IN_PROGRESS') {
+          const competitors = ev.competitors || [];
+          const teams = competitors.map((c) => {
+            const name = c.displayName || c.name || 'Team';
+            const flag = c.logo || flagService.getFlag(name);
+            if (name && flag) {
+              flagService.registerFlag(name, flag);
+            }
+            return {
+              name,
+              score: c.score || '',
+              overs: '',
+              target: '',
+              fullScore: c.score || '',
+              flag
+            };
+          });
+
+          const link = ev.links?.[0]?.href || `https://www.espncricinfo.com/series/${l.id}/${ev.id}`;
+          matches.push({
+            link,
+            status: ev.fullStatus?.type?.description || 'LIVE',
+            matchInfo: ev.name || '',
+            teams,
+            result: ev.statusText || ev.fullStatus?.type?.detail || ''
+          });
+        }
+      }
+
+      if (matches.length > 0) {
+        seriesList.push({ series: seriesTitle, matches });
+      }
+    }
+
+    return seriesList.length > 0 ? seriesList : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+/**
  * Ultra-fast direct __NEXT_DATA__ JSON extraction (< 20ms)
  * Cricinfo SSR pre-renders all matches, scores, and official CDN flags into script#__NEXT_DATA__
  */
@@ -292,6 +357,14 @@ const MatchDataController = {
     }
 
     try {
+      // 1. Ultra-fast direct ESPN API (< 100ms, immune to Akamai 403 on cloud/Vercel)
+      const espnData = await fetchEspnLiveMatches();
+      if (espnData && espnData.length > 0) {
+        cacheService.set(cacheKey, espnData, 45 * 1000);
+        return res.status(200).json(espnData);
+      }
+
+      // 2. Cricinfo Fallback
       const html = await fetchPageHtml('https://www.espncricinfo.com/live-cricket-score');
       const data = extractSeriesMatches(html);
 
