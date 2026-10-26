@@ -109,19 +109,21 @@ app.get('/health', (req, res) => {
 // Diagnostic endpoint to inspect fetch behavior on serverless
 app.get('/diag', async (req, res) => {
   const url = req.query.url || 'https://www.espncricinfo.com/live-cricket-score';
+  const ua = req.query.ua || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36';
   const t0 = Date.now();
   try {
-    const rawRes = await fetch(url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.9'
-      }
-    });
+    const headers = {
+      'User-Agent': ua
+    };
+    if (req.query.accept) headers['Accept'] = req.query.accept;
+    if (req.query.ref) headers['Referer'] = req.query.ref;
+
+    const rawRes = await fetch(url, { headers });
     const duration = Date.now() - t0;
     const body = await rawRes.text();
     res.status(200).json({
       url,
+      ua,
       status: rawRes.status,
       statusText: rawRes.statusText,
       headers: Object.fromEntries(rawRes.headers.entries()),
