@@ -106,6 +106,38 @@ app.get('/health', (req, res) => {
   res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
+// Diagnostic endpoint to inspect fetch behavior on serverless
+app.get('/diag', async (req, res) => {
+  const url = req.query.url || 'https://www.espncricinfo.com/live-cricket-score';
+  const t0 = Date.now();
+  try {
+    const rawRes = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9'
+      }
+    });
+    const duration = Date.now() - t0;
+    const body = await rawRes.text();
+    res.status(200).json({
+      url,
+      status: rawRes.status,
+      statusText: rawRes.statusText,
+      headers: Object.fromEntries(rawRes.headers.entries()),
+      durationMs: duration,
+      bodyLength: body.length,
+      bodyPreview: body.slice(0, 300),
+      hasNextData: body.includes('__NEXT_DATA__')
+    });
+  } catch (err) {
+    res.status(500).json({
+      error: err.message,
+      durationMs: Date.now() - t0
+    });
+  }
+});
+
 // Dynamic Team Flags registry endpoint
 app.get('/team-flags', (req, res) => {
   const teamQuery = req.query.team ? String(req.query.team).trim() : '';
