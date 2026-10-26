@@ -14,9 +14,7 @@ const rankingsController = {
     }
 
     try {
-      const html = await fetchPageHtml('https://www.espncricinfo.com/rankings/icc-team-ranking', {
-        waitMs: 1200
-      });
+      const html = await fetchPageHtml('https://www.espncricinfo.com/rankings/icc-team-ranking');
       const $ = cheerio.load(html);
       const tablesData = [];
 
@@ -84,9 +82,7 @@ const rankingsController = {
     }
 
     try {
-      const html = await fetchPageHtml('https://www.espncricinfo.com/rankings/icc-player-ranking', {
-        waitMs: 1200
-      });
+      const html = await fetchPageHtml('https://www.espncricinfo.com/rankings/icc-player-ranking');
       const $ = cheerio.load(html);
       const tablesData = [];
 

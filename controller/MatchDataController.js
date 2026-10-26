@@ -4,9 +4,172 @@ const cacheService = require('../services/cacheService');
 const flagService = require('../services/flagService');
 
 /**
- * Helper to extract match cards from Cricinfo series blocks (used for live and recent matches)
+ * Ultra-fast direct __NEXT_DATA__ JSON extraction (< 20ms)
+ * Cricinfo SSR pre-renders all matches, scores, and official CDN flags into script#__NEXT_DATA__
+ */
+function extractSeriesFromNextData(html) {
+  if (!html || !html.includes('__NEXT_DATA__')) return null;
+
+  try {
+    const $ = cheerio.load(html);
+    const nextDataRaw = $('script#__NEXT_DATA__').html();
+    if (!nextDataRaw) return null;
+
+    const json = JSON.parse(nextDataRaw);
+    const matches = json.props?.appPageProps?.data?.content?.matches;
+    if (!Array.isArray(matches) || matches.length === 0) return null;
+
+    const seriesMap = new Map();
+
+    for (const m of matches) {
+      const seriesTitle = m.series?.longName || m.series?.name || 'Cricket Series';
+      if (!seriesMap.has(seriesTitle)) {
+        seriesMap.set(seriesTitle, []);
+      }
+
+      const teams = (m.teams || []).map((t) => {
+        const teamObj = t.team || {};
+        const teamName = teamObj.longName || teamObj.name || 'Team';
+        const imgPath = teamObj.imageUrl || teamObj.image?.url;
+        const flag = imgPath
+          ? `https://img1.hscicdn.com/image/upload/f_auto,t_ds_square_w_160,q_50${imgPath}`
+          : flagService.getFlag(teamName);
+
+        if (teamName && flag) {
+          flagService.registerFlag(teamName, flag);
+        }
+
+        const score = t.score || '';
+        const overs = t.scoreInfo || '';
+        const fullScore = overs ? `${score} (${overs})`.trim() : score;
+
+        return {
+          name: teamName,
+          score,
+          overs,
+          target: '',
+          fullScore,
+          flag
+        };
+      });
+
+      const seriesSlug = m.series?.slug || '';
+      const matchSlug = m.slug || '';
+      const link =
+        seriesSlug && matchSlug
+          ? `https://www.espncricinfo.com/series/${seriesSlug}/${matchSlug}-${m.objectId || m.id}`
+          : '';
+
+      const matchObj = {
+        link,
+        status: m.status || m.state || (m.stage === 'RUNNING' ? 'LIVE' : 'RESULT'),
+        matchInfo: m.title || '',
+        teams,
+        result: m.statusText || ''
+      };
+
+      if (teams.length >= 2) {
+        seriesMap.get(seriesTitle).push(matchObj);
+      }
+    }
+
+    const response = [];
+    for (const [series, matchesList] of seriesMap.entries()) {
+      if (matchesList.length > 0) {
+        response.push({ series, matches: matchesList });
+      }
+    }
+    return response.length > 0 ? response : null;
+  } catch (err) {
+    return null;
+  }
+}
+
+/**
+ * Ultra-fast direct __NEXT_DATA__ JSON extraction for upcoming fixtures
+ */
+function extractUpcomingFromNextData(html) {
+  if (!html || !html.includes('__NEXT_DATA__')) return null;
+
+  try {
+    const $ = cheerio.load(html);
+    const nextDataRaw = $('script#__NEXT_DATA__').html();
+    if (!nextDataRaw) return null;
+
+    const json = JSON.parse(nextDataRaw);
+    const matches = json.props?.appPageProps?.data?.data?.content?.matches;
+    if (!Array.isArray(matches) || matches.length === 0) return null;
+
+    const response = [];
+    for (const m of matches) {
+      const teamsList = (m.teams || []).map((t) => {
+        const teamObj = t.team || {};
+        const name = teamObj.longName || teamObj.name || 'Team';
+        const imgPath = teamObj.imageUrl || teamObj.image?.url;
+        const flag = imgPath
+          ? `https://img1.hscicdn.com/image/upload/f_auto,t_ds_square_w_160,q_50${imgPath}`
+          : flagService.getFlag(name);
+
+        if (name && flag) {
+          flagService.registerFlag(name, flag);
+        }
+
+        return { name, flag };
+      });
+
+      const teamsStr = teamsList.map((t) => t.name).join(' vs ');
+      const seriesSlug = m.series?.slug || '';
+      const matchSlug = m.slug || '';
+      const link =
+        seriesSlug && matchSlug
+          ? `https://www.espncricinfo.com/series/${seriesSlug}/${matchSlug}-${m.objectId || m.id}`
+          : '';
+
+      let dateStr = 'Upcoming';
+      if (m.startDate) {
+        try {
+          const d = new Date(m.startDate);
+          dateStr = d.toLocaleDateString('en-US', { weekday: 'short', day: 'numeric', month: 'short' });
+        } catch (e) {}
+      }
+
+      let startTime = 'TBD';
+      if (m.startTime) {
+        try {
+          const t = new Date(m.startTime);
+          startTime = t.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+        } catch (e) {}
+      }
+
+      response.push({
+        date: dateStr,
+        teams: teamsStr,
+        teamDetails: teamsList,
+        venueInfo: m.ground?.name || m.ground?.smallName || 'Venue TBA',
+        seriesName: m.series?.longName || m.series?.name || 'Tournament Series',
+        startTime,
+        link,
+        matchInfo: m.title || 'Fixture'
+      });
+    }
+
+    return response.length > 0 ? response : null;
+  } catch (err) {
+    return null;
+  }
+}
+
+/**
+ * Fallback Cheerio parser if __NEXT_DATA__ is unavailable
  */
 function extractSeriesMatches(html) {
+  // 1. Check ultra-fast __NEXT_DATA__ first
+  const nextDataResult = extractSeriesFromNextData(html);
+  if (nextDataResult && nextDataResult.length > 0) {
+    return nextDataResult;
+  }
+
+  // 2. Cheerio DOM fallback
   const $ = cheerio.load(html);
   const response = [];
 
@@ -21,16 +184,13 @@ function extractSeriesMatches(html) {
 
     const matches = [];
 
-    // Match cards inside series
     $(seriesEl)
       .find('.ds-border-b.ds-border-line')
       .each((j, matchEl) => {
-        // Ensure this is a match card containing teams
         if ($(matchEl).find('.ci-team-score').length === 0) return;
 
         const match = {};
 
-        // Link
         const linkEl = $(matchEl)
           .find('a[href*="/live-cricket-score"], a[href*="/full-scorecard"], a.ds-no-tap-higlight')
           .first();
@@ -40,35 +200,29 @@ function extractSeriesMatches(html) {
         }
         match.link = link;
 
-        // Status (e.g. RESULT, LIVE, scheduled time)
         let status = $(matchEl)
           .find('span.ds-uppercase, span[class*="ds-text-tight-xs"][class*="ds-uppercase"]')
           .first()
           .text()
           .trim();
 
-        // Fallback to embedded schema.org JSON if status is empty
         if (!status) {
           const ldScript = $(matchEl).find('script[type="application/ld+json"]').first();
           if (ldScript.length) {
             try {
               const ld = JSON.parse(ldScript.text());
               status = ld.broadcastOfEvent?.eventStatus || ld.eventStatus || '';
-            } catch (e) {
-              // ignore
-            }
+            } catch (e) {}
           }
         }
         match.status = status;
 
-        // Match info
         match.matchInfo = $(matchEl)
           .find('.ds-text-tight-xs.ds-text-typo-mid3')
           .first()
           .text()
           .trim();
 
-        // Teams
         match.teams = [];
         $(matchEl).find('.ci-team-score').each((k, teamEl) => {
           const team = {};
@@ -79,7 +233,6 @@ function extractSeriesMatches(html) {
             .text()
             .trim();
 
-          // Dynamic flag extraction with fallback to dynamic registry
           team.flag = flagService.extractFlagFromElement($, teamEl, team.name);
 
           const metaText = $(teamEl)
@@ -106,7 +259,6 @@ function extractSeriesMatches(html) {
           match.teams.push(team);
         });
 
-        // Result / preview text
         match.result = $(matchEl)
           .find('p.ds-text-tight-s.ds-font-medium, p.ds-text-tight-s')
           .first()
@@ -140,9 +292,7 @@ const MatchDataController = {
     }
 
     try {
-      const html = await fetchPageHtml('https://www.espncricinfo.com/live-cricket-score', {
-        waitMs: 1500
-      });
+      const html = await fetchPageHtml('https://www.espncricinfo.com/live-cricket-score');
       const data = extractSeriesMatches(html);
 
       // Cache live matches for 45 seconds
@@ -165,9 +315,7 @@ const MatchDataController = {
     }
 
     try {
-      const html = await fetchPageHtml('https://www.espncricinfo.com/live-cricket-match-results', {
-        waitMs: 1500
-      });
+      const html = await fetchPageHtml('https://www.espncricinfo.com/live-cricket-match-results');
       const data = extractSeriesMatches(html);
 
       // Cache recent matches for 5 minutes
@@ -185,7 +333,6 @@ const MatchDataController = {
     let formattedDate = '';
 
     if (rawDate && rawDate !== 'undefined') {
-      // If provided as YYYY-MM-DD, convert to DD-MM-YYYY
       if (/^\d{4}-\d{2}-\d{2}$/.test(rawDate)) {
         const [year, month, day] = rawDate.split('-');
         formattedDate = `${day}-${month}-${year}`;
@@ -207,61 +354,66 @@ const MatchDataController = {
         ? `https://www.espncricinfo.com/live-cricket-match-schedule-fixtures?date=${formattedDate}`
         : 'https://www.espncricinfo.com/live-cricket-match-schedule-fixtures';
 
-      const html = await fetchPageHtml(url, { waitMs: 1500 });
-      const $ = cheerio.load(html);
-      const response = [];
+      const html = await fetchPageHtml(url);
 
-      $('.ds-mb-6').each((i, dateBlock) => {
-        const date = $(dateBlock).find('span[class*="ds-text-tight-s"]').first().text().trim();
+      // 1. Try __NEXT_DATA__ first
+      const nextDataUpcoming = extractUpcomingFromNextData(html);
+      let response = nextDataUpcoming;
 
-        $(dateBlock)
-          .find('div.ds-bg-fill-content-prime')
-          .each((j, cardEl) => {
-            const teamsEl = $(cardEl).find('p.ds-text-compact-s').first();
-            let teams = teamsEl.clone().children().remove().end().text().trim();
-            if (!teams) teams = teamsEl.text().trim();
-            if (!teams) return;
+      // 2. Fall back to Cheerio if not in __NEXT_DATA__
+      if (!response || response.length === 0) {
+        const $ = cheerio.load(html);
+        response = [];
 
-            // Dynamically resolve team details and flags
-            const teamParts = teams.split(/\s+(?:vs|v)\s+/i);
-            const teamDetails = teamParts.map((tName) => {
-              const cleanName = tName.trim();
-              return {
-                name: cleanName,
-                flag: flagService.getFlag(cleanName)
-              };
+        $('.ds-mb-6').each((i, dateBlock) => {
+          const date = $(dateBlock).find('span[class*="ds-text-tight-s"]').first().text().trim();
+
+          $(dateBlock)
+            .find('div.ds-bg-fill-content-prime')
+            .each((j, cardEl) => {
+              const teamsEl = $(cardEl).find('p.ds-text-compact-s').first();
+              let teams = teamsEl.clone().children().remove().end().text().trim();
+              if (!teams) teams = teamsEl.text().trim();
+              if (!teams) return;
+
+              const teamParts = teams.split(/\s+(?:vs|v)\s+/i);
+              const teamDetails = teamParts.map((tName) => {
+                const cleanName = tName.trim();
+                return {
+                  name: cleanName,
+                  flag: flagService.getFlag(cleanName)
+                };
+              });
+
+              const venueInfoFull = $(cardEl).find('div.ds-text-tight-xs').first().text().trim();
+              const venueParts = venueInfoFull.split(',');
+              const venueInfo = venueParts.slice(1).join(',').trim() || venueParts[0] || '';
+
+              const seriesLink = $(cardEl).find('a[href*="/series/"]').last();
+              const seriesName = seriesLink.attr('title') || seriesLink.text().trim();
+
+              const timeEl = $(cardEl).find('time').first();
+              const startTime = timeEl.text().trim() || $(cardEl).find('span[class*="ds-text-compact-xs"]').first().text().trim();
+
+              const linkEl = $(cardEl).find('a[href*="/live-cricket-score"], a[href*="/match/"]').first();
+              let link = linkEl.attr('href') || null;
+              if (link && !link.startsWith('http')) {
+                link = `https://www.espncricinfo.com${link}`;
+              }
+
+              response.push({
+                date,
+                teams,
+                teamDetails,
+                venueInfo,
+                seriesName,
+                startTime,
+                link,
+                matchInfo: 'Fixture'
+              });
             });
-
-            const venueInfoFull = $(cardEl).find('div.ds-text-tight-xs').first().text().trim();
-            const venueParts = venueInfoFull.split(',');
-            const venueInfo = venueParts.slice(1).join(',').trim() || venueParts[0] || '';
-
-            // Series Name
-            const seriesLink = $(cardEl).find('a[href*="/series/"]').last();
-            const seriesName = seriesLink.attr('title') || seriesLink.text().trim();
-
-            // Start Time
-            const timeEl = $(cardEl).find('time').first();
-            const startTime = timeEl.text().trim() || $(cardEl).find('span[class*="ds-text-compact-xs"]').first().text().trim();
-
-            // Link
-            const linkEl = $(cardEl).find('a[href*="/live-cricket-score"], a[href*="/match/"]').first();
-            let link = linkEl.attr('href') || null;
-            if (link && !link.startsWith('http')) {
-              link = `https://www.espncricinfo.com${link}`;
-            }
-
-            response.push({
-              date,
-              teams,
-              teamDetails,
-              venueInfo,
-              seriesName,
-              startTime,
-              link
-            });
-          });
-      });
+        });
+      }
 
       // Cache upcoming matches for 10 minutes
       cacheService.set(cacheKey, response, 10 * 60 * 1000);

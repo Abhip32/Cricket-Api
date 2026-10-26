@@ -158,14 +158,6 @@ app.use((err, req, res, next) => {
 // Start HTTP Server
 const server = app.listen(PORT, () => {
   console.log(`Server listening on port :${PORT}`);
-  // Pre-warm browser and sync flags in the background
-  browserService.getBrowser().then(() => {
-    flagService.syncFromCricinfo(browserService).catch((e) => {
-      console.warn('Background flag sync notice:', e.message);
-    });
-  }).catch((err) => {
-    console.error('Failed to pre-warm browser:', err.message);
-  });
 });
 
 // Graceful Shutdown

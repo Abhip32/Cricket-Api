@@ -13,11 +13,7 @@ const newsController = {
     }
 
     try {
-      const html = await fetchPageHtml('https://www.espncricinfo.com/cricket-news', {
-        waitMs: 2000,
-        scrollTriggerLazy: true,
-        forceBrowser: true
-      });
+      const html = await fetchPageHtml('https://www.espncricinfo.com/cricket-news');
       const $ = cheerio.load(html);
       const newsList = [];
 

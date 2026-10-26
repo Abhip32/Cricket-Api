@@ -10,11 +10,32 @@ const scoreCardController = {
     // Default to the first live or recent match if no URL is provided
     if (!url) {
       try {
-        const liveHtml = await fetchPageHtml('https://www.espncricinfo.com/live-cricket-score', { waitMs: 1000 });
-        const $live = cheerio.load(liveHtml);
-        const firstMatchLink = $live('a[href*="/live-cricket-score"], a[href*="/full-scorecard"]').first().attr('href');
-        if (firstMatchLink) {
-          url = firstMatchLink.startsWith('http') ? firstMatchLink : `https://www.espncricinfo.com${firstMatchLink}`;
+        const liveHtml = await fetchPageHtml('https://www.espncricinfo.com/live-cricket-score');
+        if (liveHtml) {
+          const $live = cheerio.load(liveHtml);
+          const nextDataRaw = $live('script#__NEXT_DATA__').html();
+          if (nextDataRaw) {
+            try {
+              const json = JSON.parse(nextDataRaw);
+              const matches = json.props?.appPageProps?.data?.content?.matches;
+              if (Array.isArray(matches) && matches.length > 0) {
+                const m = matches[0];
+                const seriesSlug = m.series?.slug;
+                const matchSlug = m.slug;
+                const id = m.objectId || m.id;
+                if (seriesSlug && matchSlug && id) {
+                  url = `https://www.espncricinfo.com/series/${seriesSlug}/${matchSlug}-${id}/full-scorecard`;
+                }
+              }
+            } catch (jsonErr) {}
+          }
+
+          if (!url) {
+            const firstMatchLink = $live('a[href*="/series/"][href*="live-cricket-score"], a[href*="/series/"][href*="scorecard"]').first().attr('href');
+            if (firstMatchLink) {
+              url = firstMatchLink.startsWith('http') ? firstMatchLink : `https://www.espncricinfo.com${firstMatchLink}`;
+            }
+          }
         }
       } catch (e) {
         console.warn('Fallback match discovery notice:', e.message);
@@ -49,7 +70,7 @@ const scoreCardController = {
     }
 
     try {
-      const html = await fetchPageHtml(url, { waitMs: 1500 });
+      const html = await fetchPageHtml(url);
       const $ = cheerio.load(html);
 
       const scorecardData = {
