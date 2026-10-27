@@ -226,13 +226,14 @@ async function fetchEspnUpcomingMatches(reqDate) {
     }
 
     const fixtures = [];
+    const seenEventIds = new Set();
 
     await Promise.all(
       dates.map(async (dt) => {
         try {
           const url = `https://site.web.api.espn.com/apis/personalized/v2/scoreboard/header?sport=cricket&dates=${dt}`;
           const controller = new AbortController();
-          const timer = setTimeout(() => controller.abort(), 3500);
+          const timer = setTimeout(() => controller.abort(), 4000);
           const res = await fetch(url, {
             signal: controller.signal,
             headers: { 'User-Agent': 'Mozilla/5.0' }
@@ -245,8 +246,10 @@ async function fetchEspnUpcomingMatches(reqDate) {
           for (const l of leagues) {
             const seriesName = l.name || 'Cricket Series';
             for (const ev of l.events || []) {
+              if (ev.id && seenEventIds.has(ev.id)) continue;
               const state = ev.fullStatus?.type?.state;
-              if (state === 'pre' || ev.status === 'pre' || ev.fullStatus?.type?.name?.includes('SCHEDULED')) {
+              if (state === 'pre' || ev.status === 'pre' || (ev.fullStatus?.type?.name && ev.fullStatus.type.name.includes('SCHEDULED'))) {
+                if (ev.id) seenEventIds.add(ev.id);
                 const competitors = ev.competitors || [];
                 const teamDetails = competitors.map((c) => {
                   const name = c.displayName || c.name || 'Team';
@@ -680,6 +683,48 @@ const MatchDataController = {
     let rawDate = req.query.date ? String(req.query.date).trim() : '';
     const category = (req.query.category || req.query.tab || 'all').toLowerCase();
     const format = req.query.format ? req.query.format.toUpperCase() : null;
+
+    const cacheKey = `espn_upcoming_only_${rawDate || 'all'}_${category}_${format || 'all'}`;
+    if (!cacheService.isBypassed(req)) {
+      const cached = cacheService.get(cacheKey);
+      if (cached) {
+        return res.status(200).json(cached);
+      }
+    }
+
+    try {
+      // 100% Direct ESPN Official Header API (< 250ms)
+      let espnUpcoming = await fetchEspnUpcomingMatches(rawDate);
+      if (espnUpcoming && espnUpcoming.length > 0) {
+        if (category && category !== 'all') {
+          espnUpcoming = espnUpcoming.filter((f) =>
+            (f.category && f.category === category) ||
+            f.seriesName.toLowerCase().includes(category) ||
+            f.venueInfo.toLowerCase().includes(category)
+          );
+        }
+        if (format && format !== 'ALL') {
+          espnUpcoming = espnUpcoming.filter((f) =>
+            (f.format && f.format.toUpperCase() === format) ||
+            f.matchInfo.toUpperCase().includes(format) ||
+            f.seriesName.toUpperCase().includes(format)
+          );
+        }
+        cacheService.set(cacheKey, espnUpcoming, 5 * 60 * 1000);
+        return res.status(200).json(espnUpcoming);
+      }
+
+      return res.status(200).json([]);
+    } catch (err) {
+      console.error('getUpcomingMatches error:', err.message);
+      res.status(500).json({ error: 'Failed to retrieve ESPN upcoming fixtures', message: err.message });
+    }
+  },
+
+  getSchedule: async (req, res) => {
+    let rawDate = req.query.date ? String(req.query.date).trim() : '';
+    const category = (req.query.category || req.query.tab || 'all').toLowerCase();
+    const format = req.query.format ? req.query.format.toUpperCase() : null;
     let formattedDate = '';
 
     if (rawDate && rawDate !== 'undefined') {
@@ -691,7 +736,7 @@ const MatchDataController = {
       }
     }
 
-    const cacheKey = `upcoming_schedule_${category}_${format || 'all'}_${formattedDate || 'all'}`;
+    const cacheKey = `schedule_fixtures_endpoint_${category}_${format || 'all'}_${formattedDate || 'all'}`;
     if (!cacheService.isBypassed(req)) {
       const cached = cacheService.get(cacheKey);
       if (cached) {
@@ -700,7 +745,7 @@ const MatchDataController = {
     }
 
     try {
-      // 1. Primary Source: Official Cricinfo Schedule & Fixtures Feed (200+ matches)
+      // 1. Primary Source: Cricinfo Official Schedule & Fixtures Feed
       const url = formattedDate
         ? `https://www.espncricinfo.com/live-cricket-match-schedule-fixtures?date=${formattedDate}`
         : 'https://www.espncricinfo.com/live-cricket-match-schedule-fixtures';
@@ -709,17 +754,12 @@ const MatchDataController = {
       let response = extractUpcomingFromNextData(html);
 
       if (response && response.length > 0) {
-        // Filter by category if requested
         if (category && category !== 'all') {
           response = response.filter((f) => f.category === category);
         }
-
-        // Filter by format if requested
         if (format && format !== 'ALL') {
           response = response.filter((f) => (f.format || '').toUpperCase() === format);
         }
-
-        // Cache upcoming matches for 10 minutes
         cacheService.set(cacheKey, response, 10 * 60 * 1000);
         return res.status(200).json(response);
       }
@@ -733,8 +773,8 @@ const MatchDataController = {
 
       return res.status(200).json([]);
     } catch (err) {
-      console.error('getUpcomingMatches error:', err.message);
-      res.status(500).json({ error: 'Failed to retrieve upcoming schedule', message: err.message });
+      console.error('getSchedule error:', err.message);
+      res.status(500).json({ error: 'Failed to retrieve tournament schedule', message: err.message });
     }
   }
 };
