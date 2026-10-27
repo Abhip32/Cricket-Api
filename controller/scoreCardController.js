@@ -22,6 +22,7 @@ function formatEspnScorecard(data) {
   const comp = data.header.competitions?.[0] || {};
   const statusType = comp.status?.type || {};
   const competitors = comp.competitors || [];
+  const rosters = data.rosters || [];
 
   const summary = {
     matchTitle: data.header.description || data.header.name || 'Match Scorecard',
@@ -54,51 +55,193 @@ function formatEspnScorecard(data) {
     if (ref) details['Match Referee'] = ref.displayName;
   }
 
+  // Extract Squads
+  const squads = {};
+  for (const r of rosters) {
+    const teamName = r.team?.displayName || r.team?.name || 'Team';
+    const players = (r.roster || []).map((p) => ({
+      name: p.athlete?.displayName || p.athlete?.name || 'Player',
+      role: p.athlete?.position?.name || 'Player',
+      image: p.athlete?.headshot?.href || null,
+      id: p.athlete?.id || null
+    }));
+    squads[teamName] = players;
+  }
+
   const tables = [];
 
-  for (const mc of data.matchcards || []) {
-    if (mc.headline === 'Batting') {
-      const rows = (mc.playerDetails || []).map((p) => {
-        const runs = Number(p.runs) || 0;
-        const balls = Number(p.ballsFaced) || 0;
-        const sr = balls > 0 ? ((runs / balls) * 100).toFixed(1) : '-';
-        return {
-          Batting: p.playerName || 'Player',
-          col_1: p.dismissal || 'not out',
-          R: String(p.runs ?? '0'),
-          B: String(p.ballsFaced ?? '0'),
-          '4s': String(p.fours ?? '0'),
-          '6s': String(p.sixes ?? '0'),
-          SR: sr
-        };
+  // Determine all innings periods played across competitors
+  const periods = new Set();
+  for (const c of competitors) {
+    for (const ls of c.linescores || []) {
+      if (ls.period) periods.add(ls.period);
+    }
+  }
+  const sortedPeriods = Array.from(periods).sort((a, b) => a - b);
+
+  for (const period of sortedPeriods) {
+    // Identify which team batted in this period
+    const battingComp =
+      competitors.find((c) => {
+        const ls = (c.linescores || []).find((l) => l.period === period);
+        return ls && (Number(ls.runs) > 0 || Number(ls.wickets) > 0 || (ls.fow && ls.fow.length > 0));
+      }) || competitors[0];
+
+    const bowlingComp = competitors.find((c) => c !== battingComp) || competitors[1];
+
+    const battingRoster = rosters.find((r) => r.team?.id === battingComp?.team?.id)?.roster || [];
+    const bowlersRoster = rosters.find((r) => r.team?.id === bowlingComp?.team?.id)?.roster || [];
+
+    const battingLinescore = (battingComp?.linescores || []).find((l) => l.period === period);
+
+    // 1. Batting Table
+    const battingRows = [];
+    for (const p of battingRoster) {
+      const ls = (p.linescores || []).find((l) => {
+        const innNum = l.statistics?.categories?.find((c) => c.name === 'general')?.stats?.find((s) => s.name === 'inningsNumber')?.value;
+        return innNum === period || l.period === period;
       });
 
+      if (ls && ls.statistics) {
+        const genStats = ls.statistics.categories?.find((c) => c.name === 'general')?.stats || [];
+        const batted = genStats.find((s) => s.name === 'batted')?.value;
+        const pos = genStats.find((s) => s.name === 'battingPosition')?.value || 99;
+        const runs = genStats.find((s) => s.name === 'runs')?.value ?? 0;
+        const balls = genStats.find((s) => s.name === 'ballsFaced')?.value ?? 0;
+        const fours = genStats.find((s) => s.name === 'fours')?.value ?? 0;
+        const sixes = genStats.find((s) => s.name === 'sixes')?.value ?? 0;
+        const sr =
+          genStats.find((s) => s.name === 'strikeRate')?.displayValue ||
+          (balls > 0 ? ((runs / balls) * 100).toFixed(1) : '-');
+
+        const nested = ls.linescores?.[0];
+        const dismissal =
+          nested?.statistics?.batting?.outDetails?.shortText ||
+          ls.statistics?.batting?.outDetails?.shortText ||
+          (batted ? 'not out' : 'did not bat');
+
+        if (batted || dismissal !== 'did not bat') {
+          battingRows.push({
+            order: pos,
+            Batting: p.athlete?.displayName || p.athlete?.name || 'Player',
+            col_1: dismissal,
+            R: String(runs),
+            B: String(balls),
+            '4s': String(fours),
+            '6s': String(sixes),
+            SR: String(sr)
+          });
+        }
+      }
+    }
+
+    battingRows.sort((a, b) => a.order - b.order);
+    battingRows.forEach((r) => delete r.order);
+
+    if (battingRows.length > 0) {
+      const innRuns = battingLinescore?.runs || '0';
+      const innWkts = battingLinescore?.wickets || '0';
+      const innOvs = battingLinescore?.overs || '';
+      const totalStr = `(${innWkts} wkts; ${innOvs} ovs)`;
+
       tables.push({
-        title: `${mc.teamName || 'Team'} Batting`,
+        title: `${battingComp?.team?.displayName || 'Team'} Batting`,
         type: 'Batting',
         headers: ['Batting', 'R', 'B', '4s', '6s', 'SR'],
-        rows,
-        extras: { total: mc.runs || '0', details: mc.extras || '' },
-        total: { score: mc.runs || '0', runs: mc.runs || '0', details: mc.total || '' }
+        rows: battingRows,
+        extras: { total: String(innRuns), details: '' },
+        total: { score: `${innRuns}/${innWkts}`, runs: String(innRuns), details: totalStr }
       });
-    } else if (mc.headline === 'Bowling') {
-      const rows = (mc.playerDetails || []).map((p) => {
-        return {
+    }
+
+    // 2. Bowling Table
+    const bowlingRows = [];
+    for (const p of bowlersRoster) {
+      const ls = (p.linescores || []).find((l) => {
+        const innNum = l.statistics?.categories?.find((c) => c.name === 'general')?.stats?.find((s) => s.name === 'inningsNumber')?.value;
+        return innNum === period || l.period === period;
+      });
+
+      if (ls && ls.statistics) {
+        const genStats = ls.statistics.categories?.find((c) => c.name === 'general')?.stats || [];
+        const overs = genStats.find((s) => s.name === 'overs')?.displayValue;
+        const pos = genStats.find((s) => s.name === 'bowlingPosition')?.value || 99;
+        const maidens = genStats.find((s) => s.name === 'maidens')?.displayValue ?? '0';
+        const conceded = genStats.find((s) => s.name === 'conceded')?.displayValue ?? '0';
+        const wickets = genStats.find((s) => s.name === 'wickets')?.displayValue ?? '0';
+        const econ = genStats.find((s) => s.name === 'economyRate')?.displayValue ?? '0.00';
+
+        if (overs && Number(overs) > 0) {
+          bowlingRows.push({
+            order: pos,
+            Bowling: p.athlete?.displayName || p.athlete?.name || 'Bowler',
+            O: String(overs),
+            M: String(maidens),
+            R: String(conceded),
+            W: String(wickets),
+            ECON: String(econ)
+          });
+        }
+      }
+    }
+
+    bowlingRows.sort((a, b) => a.order - b.order);
+    bowlingRows.forEach((r) => delete r.order);
+
+    if (bowlingRows.length > 0) {
+      tables.push({
+        title: `${bowlingComp?.team?.displayName || 'Opponent'} Bowling`,
+        type: 'Bowling',
+        headers: ['Bowling', 'O', 'M', 'R', 'W', 'ECON'],
+        rows: bowlingRows
+      });
+    }
+  }
+
+  // Fallback to matchcards if rosters had no parsed rows
+  if (tables.length === 0) {
+    for (const mc of data.matchcards || []) {
+      if (mc.headline === 'Batting') {
+        const rows = (mc.playerDetails || []).map((p) => {
+          const runs = Number(p.runs) || 0;
+          const balls = Number(p.ballsFaced) || 0;
+          const sr = balls > 0 ? ((runs / balls) * 100).toFixed(1) : '-';
+          return {
+            Batting: p.playerName || 'Player',
+            col_1: p.dismissal || 'not out',
+            R: String(p.runs ?? '0'),
+            B: String(p.ballsFaced ?? '0'),
+            '4s': String(p.fours ?? '0'),
+            '6s': String(p.sixes ?? '0'),
+            SR: sr
+          };
+        });
+
+        tables.push({
+          title: `${mc.teamName || 'Team'} Batting`,
+          type: 'Batting',
+          headers: ['Batting', 'R', 'B', '4s', '6s', 'SR'],
+          rows,
+          extras: { total: mc.runs || '0', details: mc.extras || '' },
+          total: { score: mc.runs || '0', runs: mc.runs || '0', details: mc.total || '' }
+        });
+      } else if (mc.headline === 'Bowling') {
+        const rows = (mc.playerDetails || []).map((p) => ({
           Bowling: p.playerName || 'Bowler',
           O: String(p.overs ?? '0'),
           M: String(p.maidens ?? '0'),
           R: String(p.conceded ?? '0'),
           W: String(p.wickets ?? '0'),
           ECON: String(p.economyRate ?? '0.00')
-        };
-      });
+        }));
 
-      tables.push({
-        title: `${mc.teamName || 'Opponent'} Bowling`,
-        type: 'Bowling',
-        headers: ['Bowling', 'O', 'M', 'R', 'W', 'ECON'],
-        rows
-      });
+        tables.push({
+          title: `${mc.teamName || 'Opponent'} Bowling`,
+          type: 'Bowling',
+          headers: ['Bowling', 'O', 'M', 'R', 'W', 'ECON'],
+          rows
+        });
+      }
     }
   }
 
@@ -108,6 +251,7 @@ function formatEspnScorecard(data) {
     data: {
       summary,
       details,
+      squads,
       tables
     }
   };
