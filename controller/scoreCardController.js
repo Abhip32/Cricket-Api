@@ -609,6 +609,112 @@ const scoreCardController = {
         }
       });
 
+      // Check and parse script#__NEXT_DATA__ for rich squads, details, and raw data
+      let nextDataJson = null;
+      const nextDataRaw = $('script#__NEXT_DATA__').html();
+      if (nextDataRaw) {
+        try {
+          nextDataJson = JSON.parse(nextDataRaw);
+        } catch (e) {}
+      }
+
+      const content = nextDataJson?.props?.appPageProps?.data?.content || nextDataJson?.props?.pageProps?.data?.content;
+
+      // Extract Squads from __NEXT_DATA__ matchPlayers
+      const squads = {};
+      if (content?.matchPlayers?.teamPlayers && Array.isArray(content.matchPlayers.teamPlayers)) {
+        for (const tp of content.matchPlayers.teamPlayers) {
+          const teamName = tp.team?.longName || tp.team?.name || 'Team';
+          const players = (tp.players || []).map((p) => {
+            const playerObj = p.player || {};
+            const imgPath = playerObj.image?.url;
+            const image = imgPath
+              ? `https://img1.hscicdn.com/image/upload/f_auto,t_ds_square_w_160,q_50${imgPath}`
+              : null;
+
+            return {
+              name: playerObj.name || playerObj.longName || 'Player',
+              role: p.playerRoleType || playerObj.battingStyle || playerObj.bowlingStyle || 'Player',
+              image,
+              captain: p.isCaptain || false,
+              wicketkeeper: p.isKeeper || false,
+              id: playerObj.id || playerObj.objectId || null
+            };
+          });
+
+          if (players.length > 0) {
+            squads[teamName] = players;
+          }
+        }
+      }
+
+      // Fallback squads extraction from parsed scorecard tables if not present in matchPlayers
+      if (Object.keys(squads).length === 0 && scorecardData.tables.length > 0) {
+        for (const tbl of scorecardData.tables) {
+          const teamNameMatch = tbl.title.replace(/\s+(Batting|Bowling|Innings.*)$/i, '').trim();
+          const teamKey = teamNameMatch || 'Team';
+          if (!squads[teamKey]) squads[teamKey] = [];
+
+          const existingNames = new Set(squads[teamKey].map((p) => p.name));
+
+          // Add players from rows
+          for (const row of tbl.rows || []) {
+            const pName = row['BATTING'] || row['Batting'] || row['BOWLING'] || row['Bowling'] || Object.values(row)[0] || '';
+            const cleanName = pName.split('\n')[0].replace(/►/g, '').trim();
+            if (cleanName && !existingNames.has(cleanName) && !cleanName.toLowerCase().includes('extras') && !cleanName.toLowerCase().includes('total')) {
+              existingNames.add(cleanName);
+              squads[teamKey].push({
+                name: cleanName,
+                role: tbl.type === 'Bowling' ? 'Bowler' : 'Batter',
+                image: null,
+                captain: cleanName.includes('(c)'),
+                wicketkeeper: cleanName.includes('†') || cleanName.includes('(wk)')
+              });
+            }
+          }
+
+          // Add didNotBat players
+          for (const dnb of tbl.didNotBat || []) {
+            if (dnb && !existingNames.has(dnb)) {
+              existingNames.add(dnb);
+              squads[teamKey].push({
+                name: dnb,
+                role: 'Player',
+                image: null,
+                captain: dnb.includes('(c)'),
+                wicketkeeper: dnb.includes('†') || dnb.includes('(wk)')
+              });
+            }
+          }
+        }
+      }
+
+      // Extract details (Match Info, Umpires, Toss, Venue)
+      const details = {};
+      if (venue) details['Venue'] = venue;
+      if (result) details['Match Result'] = result;
+      if (sportsEvent?.name) details['Match Title'] = sportsEvent.name;
+
+      $('div.ds-text-tight-s, table.ds-w-full tr').each((_, el) => {
+        const text = $(el).text().trim();
+        if (text.includes('Toss') && !details['Toss']) {
+          details['Toss'] = text.replace(/^Toss\s*/i, '').trim();
+        }
+        if (text.includes('Umpires') && !details['Umpires']) {
+          details['Umpires'] = text.replace(/^Umpires\s*/i, '').trim();
+        }
+        if (text.includes('Match Referee') && !details['Match Referee']) {
+          details['Match Referee'] = text.replace(/^Match Referee\s*/i, '').trim();
+        }
+        if (text.includes('TV Umpire') && !details['TV Umpire']) {
+          details['TV Umpire'] = text.replace(/^TV Umpire\s*/i, '').trim();
+        }
+      });
+
+      scorecardData.squads = squads;
+      scorecardData.details = details;
+      scorecardData.raw = nextDataJson || null;
+
       if (scorecardData.tables.length === 0 && (!scorecardData.summary || scorecardData.summary.teams.length === 0)) {
         return res.status(404).json({
           error: 'No scorecard data found',
