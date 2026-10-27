@@ -1,6 +1,6 @@
 # Cricket API & Scraper 🏏
 
-A high-performance, resilient REST API and web scraper for real-time cricket data, scores, fixtures, news, ICC rankings, and detailed match scorecards.
+A high-performance, resilient REST API and web scraper for real-time cricket data, live match scores, fixtures, tournament schedules, Cricbuzz photo galleries, ICC rankings, ball-by-ball commentary, and detailed innings scorecards.
 
 ![Cricket API Live Preview](assets/preview.png)
 
@@ -8,44 +8,60 @@ A high-performance, resilient REST API and web scraper for real-time cricket dat
 
 ## 📱 Frontend Companion: CricGeek UI
 
-This backend powers **[CricGeek](https://github.com/Abhip32/CricGeek)** — a luxury cricket sports platform built with Next.js 15, React 19, Tailwind CSS, and Framer Motion.  
+This backend powers **[CricGeek](https://github.com/Abhip32/CricGeek)** — a luxury sports web platform inspired by athletic editorial styling (bold high-contrast typography, athletic crimson red `#DC2626` / pure white theme, freely-rendering flags, and zero auto-polling overhead).  
 🌐 **Live Web Application**: [https://cric-geek.vercel.app](https://cric-geek.vercel.app)
 
-| Home Dashboard | Live Match Center |
-|:---:|:---:|
-| ![Home Dashboard](assets/cricgeek-home.png) | ![Live Match Center](assets/cricgeek-matches.png) |
+### 📸 Application Views & Showcase
 
-| Innings Scorecard & Analytics | Match Schedule & Fixtures | Official ICC Leaderboards |
+| Home Dashboard | Live Match Center | Completed Fixtures & Results |
 |:---:|:---:|:---:|
-| ![Interactive Scorecard](assets/cricgeek-scorecard.png) | ![Tournament Schedule](assets/cricgeek-schedule.png) | ![ICC Rankings](assets/cricgeek-rankings.png) |
+| ![Home Dashboard](assets/home.png) | ![Live Match Center](assets/matches.png) | ![Recent Results](assets/matches-recent.png) |
+
+| Innings Scorecard & Analytics | MVP & Player Impact Leaderboard | Ball-by-Ball Commentary & Over Timeline |
+|:---:|:---:|:---:|
+| ![Interactive Scorecard](assets/scorecard.png) | ![MVP & Impact](assets/scorecard-mvp.png) | ![Commentary](assets/scorecard-commentary.png) |
+
+| Match Info & Playing XI | Tournament Schedule & Fixtures | Official ICC Leaderboards |
+|:---:|:---:|:---:|
+| ![Match Info & Squads](assets/scorecard-info.png) | ![Tournament Schedule](assets/schedule.png) | ![ICC Rankings](assets/rankings.png) |
+
+| Cricbuzz High-Res Photo Galleries | ICC Player Rankings | Upcoming Fixtures (ESPN Powered) |
+|:---:|:---:|:---:|
+| ![Photo Galleries](assets/photos.png) | ![Player Rankings](assets/rankings-players.png) | ![Upcoming Matches](assets/matches-upcoming.png) |
 
 ---
 
-## ⚡ What Was Fixed & Improved
+## ⚡ Key Architecture & Recent Upgrades
 
-1. **Dynamic Team Flags & Lazy-Loading Solution**:
-   - Previously, team flags were read from a static 4-year-old JSON dump (`team_flags.json`) because ESPN Cricinfo uses lazy-loaded image placeholders (`lazyimage-noaspect.svg` / `transparent.png`).
-   - Built a dynamic [`flagService.js`](file:///c:/Users/abhis/OneDrive/Desktop/Desktop/Cricket-Api/services/flagService.js) that:
-     - Automatically learns and registers flags dynamically from live matches, scorecards, rankings, and match cards.
-     - Performs automated background sync from Cricinfo's team directory, smooth-scrolling to resolve IntersectionObserver lazy-load placeholders into high-resolution CDN images.
-     - Resolves team abbreviations (`IND`, `AUS`, `NZ`, `SA`, `ENG`, etc.) and fuzzy team name variations.
-     - Adds structured `teamDetails` with dynamic flags to upcoming fixtures (`/getUpcoming`).
-     - Exposes a new `/team-flags` endpoint to inspect or query flags by team name.
-2. **Selector & Layout Fixes**:
-   - Modernized all Tailwind CSS selectors from Cricinfo's legacy classes (e.g. `ds-font-bold` → `ds-font-medium`, `ds-table` → `ds-v2-table`).
-   - Integrated Schema.org `application/ld+json` fallbacks for rock-solid parsing.
-3. **Infinite Hang & Performance Overhaul**:
-   - Removed unbounded `autoScroll` and `networkidle2: timeout: 0`.
-   - Intercepts and blocks fonts, video, media, and tracking scripts, reducing latency from 30+ seconds down to **1.5–2.5 seconds**.
-4. **Active Multi-Tier In-Memory Caching**:
-   - Integrated automatic TTL caching across all endpoints with LRU cleanup.
+1. **100% ESPN API-Powered Upcoming Matches (`/getUpcoming`)**:
+   - Replaced fragile HTML table scrapers with direct integration into ESPN Cricinfo's official Header API (`fetchEspnUpcomingMatches`).
+   - Guarantees complete, un-truncated coverage of all upcoming international and domestic matches with reliable timestamps and team details.
+
+2. **Dedicated Tournament Schedule Endpoint (`/getSchedule`)**:
+   - Completely separated tournament schedules and series calendars from daily upcoming match fixtures.
+   - Parses detailed fixture matrices including match dates, tournament series titles, venue locations, and match formats.
+
+3. **Cricbuzz Photo Galleries & Albums (`/getPhotos`)**:
+   - Integrated Cricbuzz photo gallery scraper providing high-resolution cricket photography (`750x422`).
+   - Supports album listings and individual gallery view queries (`?id=:albumId`) with photo titles, high-res image CDN links, and photo captions.
+
+4. **Dynamic Team Flags & Lazy-Loading Solution (`flagService.js`)**:
+   - Resolves ESPN Cricinfo's lazy-loaded SVG placeholders (`lazyimage-noaspect.svg`) in real time.
+   - Learns and registers team flags dynamically from live matches, scorecards, rankings, and match cards.
+   - Built-in resolution for 190+ country flags and club badges, with instant fallback matching.
+   - Exposes `/team-flags` to query any flag by name or abbreviation (e.g. `?team=India` or `?team=NZ`).
+
+5. **Ball-by-Ball Commentary Stream (`/getCommentary`)**:
+   - Real-time commentary stream with bowler-to-batter matchup headlines, over summaries, ball outcomes (`W`, `4`, `6`, `1`, `0`), and narrative ball descriptions.
+
+6. **Active Multi-Tier In-Memory Caching (`cacheService.js`)**:
+   - High-performance LRU memory cache with endpoint-specific TTLs (45s for live scores, 10m for upcoming/news, 1h for rankings).
    - Cache hits respond in **< 5 milliseconds**.
-   - Added `?refresh=true` or `?nocache=true` support on all endpoints.
-5. **Resilient Browser Service**:
-   - Centralized in [`browserService.js`](file:///c:/Users/abhis/OneDrive/Desktop/Desktop/Cricket-Api/services/browserService.js) with auto-reconnection and cleanup in `finally` blocks.
-6. **Scorecard URL Normalization**:
-   - Accepts any Cricinfo match URL (commentary, preview, report) and automatically routes to `/full-scorecard`.
-   - Resolves the latest active match dynamically if no URL is provided.
+   - Bypass cache anytime using `?refresh=true` or `?nocache=true`.
+
+7. **Resilient Puppeteer & Serverless Chromium Engine (`browserService.js`)**:
+   - Centralized browser management with auto-reconnection and resource cleanup.
+   - Blocks heavy stylesheets, fonts, ads, and video streams to reduce scraping latency from 30s down to **1.5–2.5s**.
 
 ---
 
@@ -61,7 +77,7 @@ npm install
 # Production mode
 npm start
 
-# Development mode with live reload
+# Development mode with nodemon live reload
 npm run dev
 
 # Re-generate documentation preview screenshot
@@ -72,75 +88,96 @@ The API will be available at `http://localhost:8000`.
 
 ---
 
-## ☁️ Vercel Deployment
+## ☁️ Vercel Serverless Deployment
 
 This project is optimized for deployment as a Vercel Serverless Function:
-- **Serverless Chromium**: Automatically switches to [`@sparticuz/chromium-min`](https://github.com/Sparticuz/chromium) and `puppeteer-core` in serverless environments (`VERCEL=1`), fitting cleanly within Vercel's 50MB function zip limit without missing shared libraries.
+- **Serverless Chromium**: Automatically switches to [`@sparticuz/chromium-min`](https://github.com/Sparticuz/chromium) and `puppeteer-core` in serverless environments (`VERCEL=1`), fitting cleanly within Vercel's function zip limits without missing shared C++ libraries.
 - **Local Fallback**: Automatically discovers local Chrome / Edge installations when running on local development machines.
-- **Extended Timeout**: Configured with `maxDuration: 60` and `memory: 1024` in [`vercel.json`](file:///c:/Users/abhis/OneDrive/Desktop/Desktop/Cricket-Api/vercel.json) to ensure headless browser launches and page parsing finish comfortably.
-- **Ignored Assets**: Unnecessary heavy files (`.vercelignore`) are omitted from deployment bundles to keep serverless functions lightweight and fast.
+- **Extended Timeout**: Configured with `maxDuration: 60` and `memory: 1024` in [`vercel.json`](vercel.json) to ensure headless browser launches and page parsing finish comfortably.
 
 ---
 
-## 📖 API Documentation
+## 📖 API Documentation & Endpoints
 
 ### 1. Root & Documentation
 - **Endpoint**: `GET /`
-- **Description**: Returns API status and interactive catalog of all available endpoints.
+- **Description**: Returns live API status and an interactive catalog of all available endpoints and parameters.
 
 ### 2. Health Check
 - **Endpoint**: `GET /health`
-- **Description**: Lightweight health probe for monitoring and uptime checkers.
+- **Description**: Lightweight health probe returning `{ status: 'ok', timestamp: '...' }` for uptime checkers.
 
 ### 3. Live Matches
 - **Endpoint**: `GET /getLive`
 - **Cache TTL**: 45 seconds
 - **Parameters**: `refresh=true` *(optional)*
-- **Response**: Live match cards with scores, overs, run rates, targets, and dynamic flags.
+- **Response**: Array of current live matches with teams, scores, overs, run rates, targets, series, match status, and dynamic team flags.
 
 ### 4. Recent Matches
 - **Endpoint**: `GET /getRecent`
 - **Cache TTL**: 5 minutes
 - **Parameters**: `refresh=true` *(optional)*
-- **Response**: Completed matches with results and dynamic flags.
+- **Response**: Completed matches grouped by series with final results, scores, and dynamic team flags.
 
 ### 5. Upcoming Matches & Fixtures
 - **Endpoint**: `GET /getUpcoming`
 - **Cache TTL**: 10 minutes
-- **Parameters**:
-  - `date` *(optional)*: Filter in `DD-MM-YYYY` or `YYYY-MM-DD` (e.g., `?date=2026-10-25`).
-  - `refresh=true` *(optional)*
-- **Response**: Upcoming fixtures with `teams`, `teamDetails` (name + dynamic flag), venue, series, and match time.
+- **Source**: 100% powered by ESPN Cricinfo official API.
+- **Parameters**: `refresh=true` *(optional)*
+- **Response**: Upcoming fixtures with full team details, dynamic team flags, tournament series, start date/time, and match status.
 
-### 6. Cricket News
+### 6. Tournament Schedule & Fixtures Calendar
+- **Endpoint**: `GET /getSchedule`
+- **Alias**: `GET /getschdule`
+- **Cache TTL**: 10 minutes
+- **Parameters**: `refresh=true` *(optional)*
+- **Response**: Comprehensive tournament schedules, series fixtures, venue information, and match timings across international and domestic cricket.
+
+### 7. Cricbuzz Photo Galleries & Albums
+- **Endpoint**: `GET /getPhotos`
+- **Cache TTL**: 15 minutes
+- **Parameters**:
+  - `id` *(optional)*: Album ID (e.g. `?id=2405`) to fetch individual gallery images with captions and photo credits.
+  - `refresh=true` *(optional)*
+- **Response**: High-resolution cricket photo albums (`750x422`) with titles, cover images, image counts, and timestamps.
+
+### 8. Full Match Scorecard
+- **Endpoint**: `GET /getScoreCard` or `GET /getScorecard`
+- **Cache TTL**: 45 seconds (live) / 30 minutes (completed)
+- **Parameters**:
+  - `url` *(optional)*: ESPN Cricinfo match URL. Defaults to the latest active match if omitted.
+  - `refresh=true` *(optional)*
+- **Response**: Detailed scorecard with batting tables (runs, balls, 4s, 6s, SR, dismissal), bowling tables (overs, maidens, runs, wickets, economy), fall of wickets, team totals, player headshots, and match status.
+
+### 9. Ball-by-Ball Match Commentary
+- **Endpoint**: `GET /getCommentary`
+- **Cache TTL**: 30 seconds
+- **Parameters**:
+  - `url` *(required)*: ESPN Cricinfo match URL.
+  - `refresh=true` *(optional)*
+- **Response**: Ball-by-ball commentary entries with over numbers, ball outcomes (`W`, `4`, `6`, `1`, `0`), bowler and batter names, and narrative commentary text.
+
+### 10. Cricket News
 - **Endpoint**: `GET /getNews`
 - **Cache TTL**: 10 minutes
 - **Parameters**: `refresh=true` *(optional)*
-- **Response**: Latest cricket news with title, description, author, publication date, image, and article link.
+- **Response**: Latest cricket news articles with titles, descriptions, authors, publication dates, images, and article links.
 
-### 7. ICC Team Rankings
-- **Endpoint**: `GET /rankings/icc-team-ranking`
+### 11. ICC Team Rankings
+- **Endpoint**: `GET /rankings/icc-team-ranking` or `GET /getTeamRankings`
 - **Cache TTL**: 1 hour
-- **Response**: Men's and Women's ICC rankings for Test, ODI, and T20 teams with logos.
+- **Response**: Men's and Women's ICC rankings for Test, ODI, and T20 teams with ratings, points, and dynamic logos.
 
-### 8. ICC Player Rankings
-- **Endpoint**: `GET /rankings/icc-player-ranking`
+### 12. ICC Player Rankings
+- **Endpoint**: `GET /rankings/icc-player-ranking` or `GET /getBattingRankings`, `/getBowlingRankings`, `/getAllRounderRankings`
 - **Cache TTL**: 1 hour
-- **Response**: ICC rankings for Batting, Bowling, and All-rounders across Test, ODI, and T20.
+- **Response**: Official ICC player rankings across Batting, Bowling, and All-rounders in Test, ODI, and T20 formats with player names, ratings, and nationalities.
 
-### 9. Full Match Scorecard
-- **Endpoint**: `GET /getScorecard`
-- **Cache TTL**: 45 seconds (live) / 30 minutes (completed)
-- **Parameters**:
-  - `url` *(optional)*: Match scorecard URL. Defaults to the latest active match.
-  - `refresh=true` *(optional)*
-- **Response**: Innings batting & bowling tables, fall of wickets, team scores, and summary.
-
-### 10. Team Flags Directory
+### 13. Dynamic Team Flags Directory
 - **Endpoint**: `GET /team-flags`
 - **Parameters**:
   - `team` *(optional)*: Query flag for a specific team (e.g. `?team=India` or `?team=NZ`).
-- **Response**: Dynamically resolved flag URLs.
+- **Response**: Full dictionary of resolved team names and high-resolution flag CDN URLs.
 
 ---
 
@@ -148,20 +185,32 @@ This project is optimized for deployment as a Vercel Serverless Function:
 
 ```
 Cricket-Api/
+├── assets/                       # High-resolution screenshots & preview assets
 ├── controller/
-│   ├── MatchDataController.js    # Live, Recent, and Upcoming matches
+│   ├── MatchDataController.js    # Live, Recent, Upcoming (ESPN API), & Schedule
 │   ├── newsController.js         # Cricket news extraction
+│   ├── photoController.js        # Cricbuzz photo galleries & albums
 │   ├── rankingController.js      # ICC team & player rankings
-│   └── scoreCardController.js    # Full match scorecards
+│   └── scoreCardController.js    # Full match scorecards & ball-by-ball commentary
 ├── routes/
-│   ├── MatchDataRoute.js         # /getLive, /getRecent, /getUpcoming
+│   ├── MatchDataRoute.js         # /getLive, /getRecent, /getUpcoming, /getSchedule
 │   ├── newsRoute.js              # /getNews
+│   ├── photoRoute.js             # /getPhotos
 │   ├── rankingRoutes.js          # /rankings/*
-│   └── ScoreCardRoute.js         # /getScorecard
+│   └── ScoreCardRoute.js         # /getScorecard, /getCommentary
 ├── services/
-│   ├── browserService.js         # Shared Puppeteer instance & optimization
+│   ├── browserService.js         # Puppeteer lifecycle & ad/media blocker
 │   ├── cacheService.js           # Multi-tier TTL cache with LRU eviction
 │   └── flagService.js            # Dynamic team flag learning & resolution
+├── scripts/
+│   └── generate_screenshot.js    # Generates preview.png asset
 ├── index.js                      # Main Express server & API catalog
+├── vercel.json                   # Serverless deployment configuration
 └── package.json                  # Dependencies & scripts
 ```
+
+---
+
+## 👨‍💻 Author
+
+Created & Maintained by **[Abhip32](https://github.com/Abhip32)**

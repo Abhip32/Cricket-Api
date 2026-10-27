@@ -45,10 +45,38 @@ app.get('/', (req, res) => {
       upcomingMatches: {
         endpoint: '/getUpcoming',
         method: 'GET',
-        description: 'Returns upcoming scheduled matches, fixtures, and dynamic team details with flags.',
+        description: 'Returns upcoming scheduled matches and fixtures powered directly by ESPN Cricinfo official API with dynamic team flags.',
         cacheTTL: '10 minutes',
         parameters: {
-          date: 'Optional date filter in DD-MM-YYYY or YYYY-MM-DD (e.g. ?date=25-10-2026)',
+          refresh: 'Optional boolean (e.g. ?refresh=true) to bypass cache'
+        }
+      },
+      schedule: {
+        endpoint: '/getSchedule',
+        method: 'GET',
+        description: 'Returns comprehensive tournament schedules, series fixtures, and match timings across international and domestic cricket.',
+        cacheTTL: '10 minutes',
+        parameters: {
+          refresh: 'Optional boolean (e.g. ?refresh=true) to bypass cache'
+        }
+      },
+      photos: {
+        endpoint: '/getPhotos',
+        method: 'GET',
+        description: 'Returns latest cricket photo galleries and high-resolution images sourced from Cricbuzz.',
+        cacheTTL: '15 minutes',
+        parameters: {
+          id: 'Optional album ID (e.g. ?id=2405) to fetch high-resolution gallery images with captions',
+          refresh: 'Optional boolean (e.g. ?refresh=true) to bypass cache'
+        }
+      },
+      commentary: {
+        endpoint: '/getCommentary',
+        method: 'GET',
+        description: 'Returns real-time ball-by-ball match commentary with over summaries, ball outcomes, and bowler-batter matchups.',
+        cacheTTL: '30 seconds',
+        parameters: {
+          url: 'ESPN Cricinfo match URL (e.g. ?url=https://www.espncricinfo.com/series/.../live-cricket-score)',
           refresh: 'Optional boolean (e.g. ?refresh=true) to bypass cache'
         }
       },
@@ -158,14 +186,17 @@ app.use(require('./routes/newsRoute'));
 app.use(require('./routes/MatchDataRoute'));
 app.use(require('./routes/rankingRoutes'));
 app.use(require('./routes/ScoreCardRoute'));
+app.use(require('./routes/photoRoute'));
 
 // Frontend Compatibility Aliases
 const matchController = require('./controller/MatchDataController');
 const rankingController = require('./controller/rankingController');
 const scoreCardController = require('./controller/scoreCardController');
+const photoController = require('./controller/photoController');
 
 app.get('/getScoreCard', scoreCardController.getScorecard);
 app.get('/getCommentary', scoreCardController.getCommentary);
+app.get('/getPhotos', photoController.getPhotos);
 app.get('/getSchedule', matchController.getSchedule);
 app.get('/getschdule', matchController.getSchedule);
 app.get('/getTeamRankings', rankingController.getICCtables);
