@@ -15,7 +15,7 @@ This backend powers **[CricGeek](https://github.com/Abhip32/CricGeek)** — a lu
 
 | Home Dashboard | Live Match Center | Completed Fixtures & Results |
 |:---:|:---:|:---:|
-| ![Home Dashboard](assets/home.png) | ![Live Match Center](assets/matches.png) | ![Recent Results](assets/matches-recent.png) |
+| ![Home Dashboard](assets/a-home.png) | ![Live Match Center](assets/matches.png) | ![Recent Results](assets/matches-recent.png) |
 
 | Innings Scorecard & Analytics | MVP & Player Impact Leaderboard | Ball-by-Ball Commentary & Over Timeline |
 |:---:|:---:|:---:|
