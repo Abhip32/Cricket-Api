@@ -165,6 +165,7 @@ const rankingController = require('./controller/rankingController');
 const scoreCardController = require('./controller/scoreCardController');
 
 app.get('/getScoreCard', scoreCardController.getScorecard);
+app.get('/getCommentary', scoreCardController.getCommentary);
 app.get('/getSchedule', matchController.getUpcomingMatches);
 app.get('/getschdule', matchController.getUpcomingMatches);
 app.get('/getTeamRankings', rankingController.getICCtables);

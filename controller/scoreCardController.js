@@ -16,6 +16,45 @@ function extractIdsFromUrl(inputUrl) {
   return null;
 }
 
+async function fetchEspnCommentary(leagueId, eventId) {
+  try {
+    const url = `https://site.web.api.espn.com/apis/site/v2/sports/cricket/${leagueId}/playbyplay?event=${eventId}`;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 4000);
+    const res = await fetch(url, {
+      signal: controller.signal,
+      headers: { 'User-Agent': 'Mozilla/5.0' }
+    });
+    clearTimeout(timer);
+    if (!res.ok) return [];
+    const json = await res.json();
+    const items = json.commentary?.items || [];
+    return items.map((item) => ({
+      id: item.id,
+      over: item.over?.overs || item.over?.actual || 0,
+      ball: item.over?.ball || 0,
+      shortText: item.shortText || '',
+      text: item.text || item.shortText || '',
+      runs: item.scoreValue ?? 0,
+      isWicket: Boolean(
+        item.dismissal?.dismissal ||
+        item.playType?.description?.toLowerCase().includes('out') ||
+        item.shortText?.toLowerCase().includes('out')
+      ),
+      dismissal: item.dismissal?.text || '',
+      bowler: item.bowler?.athlete?.displayName || '',
+      batsman: item.batsman?.athlete?.displayName || '',
+      team: item.team?.displayName || item.team?.name || '',
+      period: item.periodText || `Innings ${item.period || 1}`,
+      preText: item.preText || '',
+      postText: item.postText || '',
+      timestamp: item.date || null
+    }));
+  } catch (e) {
+    return [];
+  }
+}
+
 function formatEspnScorecard(data) {
   if (!data || !data.header) return null;
 
@@ -24,11 +63,37 @@ function formatEspnScorecard(data) {
   const competitors = comp.competitors || [];
   const rosters = data.rosters || [];
 
+  // Extract Leaders & MVP from ESPN summary payload
+  const leaders = [];
+  for (const teamLeaders of data.leaders || []) {
+    const teamName = teamLeaders.team?.displayName || teamLeaders.team?.name || '';
+    const teamLogo = teamLeaders.team?.logos?.[0]?.href || teamLeaders.team?.logo || flagService.getFlag(teamName);
+    for (const ls of teamLeaders.linescores || []) {
+      for (const cat of ls.leaders || []) {
+        const catName = cat.displayName || cat.name || 'Leader';
+        for (const l of cat.leaders || []) {
+          const athlete = l.athlete || {};
+          leaders.push({
+            category: catName,
+            team: teamName,
+            teamLogo,
+            name: athlete.displayName || athlete.fullName || athlete.name || 'Player',
+            score: l.displayValue || l.value || '',
+            image: athlete.headshot?.href || null,
+            position: athlete.position?.name || '',
+            id: athlete.id || null
+          });
+        }
+      }
+    }
+  }
+
   const summary = {
     matchTitle: data.header.description || data.header.name || 'Match Scorecard',
     status: statusType.description || 'Live',
     result: statusType.detail || comp.statusText || '',
     venue: data.gameInfo?.venue?.fullName || '',
+    playerOfTheMatch: leaders.find(l => l.category.toLowerCase().includes('run'))?.name || '',
     teams: competitors.map((c) => {
       const name = c.team?.displayName || c.team?.name || 'Team';
       const logo = c.team?.logos?.[0]?.href || c.team?.logo || flagService.getFlag(name);
@@ -361,8 +426,13 @@ const scoreCardController = {
         clearTimeout(timer);
         if (rawRes.ok) {
           const rawJson = await rawRes.json();
-          const formatted = formatEspnScorecard(rawJson);
+          const [formatted, commentary] = await Promise.all([
+            formatEspnScorecard(rawJson),
+            fetchEspnCommentary(ids.leagueId, ids.eventId)
+          ]);
+
           if (formatted && formatted.data && formatted.data.tables.length > 0) {
+            formatted.data.commentary = commentary;
             const isCompleted =
               formatted.data.summary.status?.toLowerCase().includes('result') ||
               formatted.data.summary.status?.toLowerCase().includes('final');
@@ -743,6 +813,38 @@ const scoreCardController = {
         details: err.message
       });
     }
+  },
+
+  getCommentary: async (req, res) => {
+    let url = req.query.url;
+    if (!url) {
+      try {
+        const headerRes = await fetch(
+          'https://site.web.api.espn.com/apis/personalized/v2/scoreboard/header?sport=cricket',
+          { headers: { 'User-Agent': 'Mozilla/5.0' } }
+        );
+        if (headerRes.ok) {
+          const headerJson = await headerRes.json();
+          const firstLeague = headerJson.sports?.[0]?.leagues?.[0];
+          const firstEvent = firstLeague?.events?.[0];
+          if (firstLeague?.id && firstEvent?.id) {
+            url = `https://www.espn.in/cricket/series/${firstLeague.id}/game/${firstEvent.id}`;
+          }
+        }
+      } catch (e) {}
+    }
+
+    if (!url) {
+      return res.status(400).json({ error: 'No match URL provided' });
+    }
+
+    const ids = extractIdsFromUrl(url);
+    if (ids && ids.leagueId && ids.eventId) {
+      const commentary = await fetchEspnCommentary(ids.leagueId, ids.eventId);
+      return res.status(200).json(commentary);
+    }
+
+    return res.status(200).json([]);
   }
 };
 
