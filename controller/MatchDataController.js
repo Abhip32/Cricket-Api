@@ -36,12 +36,28 @@ async function fetchEspnLiveMatches() {
             if (name && flag) {
               flagService.registerFlag(name, flag);
             }
+
+            const rawScore = c.score || '';
+            let score = rawScore;
+            let overs = c.overs || '';
+            let target = '';
+
+            const oversMatch = rawScore.match(/\(([\d\.\/]+\s*ov[^\)]*)\)/i);
+            if (oversMatch) {
+              overs = oversMatch[1].replace(/,\s*target.*$/i, '').trim();
+              score = rawScore.replace(/\s*\([^\)]*\)/g, '').trim();
+            }
+            const targetMatch = rawScore.match(/target\s*(\d+)/i);
+            if (targetMatch) {
+              target = targetMatch[1];
+            }
+
             return {
               name,
-              score: c.score || '',
-              overs: '',
-              target: '',
-              fullScore: c.score || '',
+              score,
+              overs,
+              target,
+              fullScore: rawScore,
               flag
             };
           });
@@ -52,7 +68,8 @@ async function fetchEspnLiveMatches() {
             status: ev.fullStatus?.type?.description || 'LIVE',
             matchInfo: ev.name || '',
             teams,
-            result: ev.statusText || ev.fullStatus?.type?.detail || ''
+            result: ev.statusText || ev.fullStatus?.type?.detail || '',
+            raw: ev
           });
         }
       }
@@ -122,12 +139,28 @@ async function fetchEspnRecentMatches() {
                   if (name && flag) {
                     flagService.registerFlag(name, flag);
                   }
+
+                  const rawScore = c.score || '';
+                  let score = rawScore;
+                  let overs = c.overs || '';
+                  let target = '';
+
+                  const oversMatch = rawScore.match(/\(([\d\.\/]+\s*ov[^\)]*)\)/i);
+                  if (oversMatch) {
+                    overs = oversMatch[1].replace(/,\s*target.*$/i, '').trim();
+                    score = rawScore.replace(/\s*\([^\)]*\)/g, '').trim();
+                  }
+                  const targetMatch = rawScore.match(/target\s*(\d+)/i);
+                  if (targetMatch) {
+                    target = targetMatch[1];
+                  }
+
                   return {
                     name,
-                    score: c.score || '',
-                    overs: '',
-                    target: '',
-                    fullScore: c.score || '',
+                    score,
+                    overs,
+                    target,
+                    fullScore: rawScore,
                     flag
                   };
                 });
@@ -138,7 +171,8 @@ async function fetchEspnRecentMatches() {
                   status: ev.fullStatus?.type?.description || 'RESULT',
                   matchInfo: ev.name || '',
                   teams,
-                  result: ev.statusText || ev.fullStatus?.type?.detail || ''
+                  result: ev.statusText || ev.fullStatus?.type?.detail || '',
+                  raw: ev
                 });
               }
             }
@@ -236,7 +270,8 @@ async function fetchEspnUpcomingMatches(reqDate) {
                   seriesName,
                   startTime,
                   link,
-                  matchInfo: ev.name || 'Fixture'
+                  matchInfo: ev.name || 'Fixture',
+                  raw: ev
                 });
               }
             }

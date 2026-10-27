@@ -35,7 +35,15 @@ async function fetchRssNews() {
         description,
         image,
         date: pubDate,
-        author
+        author,
+        raw: {
+          title,
+          link,
+          description,
+          image,
+          pubDate,
+          author
+        }
       });
     });
 

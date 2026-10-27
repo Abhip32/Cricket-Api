@@ -252,7 +252,13 @@ function formatEspnScorecard(data) {
       summary,
       details,
       squads,
-      tables
+      tables,
+      leaders: data.leaders || [],
+      gameInfo: data.gameInfo || {},
+      notes: data.notes || [],
+      debuts: data.debuts || [],
+      videos: data.videos || [],
+      raw: data // Complete 100% unstripped underlying ESPN payload
     }
   };
 }
