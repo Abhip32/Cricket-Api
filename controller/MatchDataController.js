@@ -368,6 +368,41 @@ function extractSeriesFromNextData(html) {
   }
 }
 
+function categorizeFixture(m) {
+  const cid = m.internationalClassId || m.generalClassId;
+  const seriesName = (m.series?.longName || m.series?.name || '').toLowerCase();
+  const title = (m.title || '').toLowerCase();
+
+  if (cid === 9 || cid === 17 || seriesName.includes('women') || title.includes('women')) {
+    return 'women';
+  }
+  if (cid === 1 || cid === 2 || cid === 3) {
+    return 'international';
+  }
+  if (
+    cid === 6 ||
+    cid === 13 ||
+    seriesName.includes('league') ||
+    seriesName.includes('premier') ||
+    seriesName.includes('bbl') ||
+    seriesName.includes('ipl') ||
+    seriesName.includes('super smash') ||
+    seriesName.includes('t20')
+  ) {
+    return 't20leagues';
+  }
+  if (
+    cid === 4 ||
+    cid === 5 ||
+    seriesName.includes('trophy') ||
+    seriesName.includes('shield') ||
+    seriesName.includes('championship')
+  ) {
+    return 'domestic';
+  }
+  return 'other';
+}
+
 /**
  * Ultra-fast direct __NEXT_DATA__ JSON extraction for upcoming fixtures
  */
@@ -397,7 +432,11 @@ function extractUpcomingFromNextData(html) {
           flagService.registerFlag(name, flag);
         }
 
-        return { name, flag };
+        return {
+          name,
+          abbreviation: teamObj.abbreviation || teamObj.shortName || name.slice(0, 3).toUpperCase(),
+          flag
+        };
       });
 
       const teamsStr = teamsList.map((t) => t.name).join(' vs ');
@@ -424,15 +463,25 @@ function extractUpcomingFromNextData(html) {
         } catch (e) {}
       }
 
+      const category = categorizeFixture(m);
+
       response.push({
+        id: m.objectId || m.id || `${m.slug || 'fixture'}`,
         date: dateStr,
+        startDate: m.startDate || null,
+        startTime,
+        category,
+        format: m.format || 'CRICKET',
+        stage: m.stage || '',
+        matchInfo: m.title || 'Fixture',
+        seriesName: m.series?.longName || m.series?.name || 'Tournament Series',
+        venueInfo: m.ground?.name || m.ground?.smallName || 'Venue TBA',
+        groundCity: m.ground?.town?.name || '',
         teams: teamsStr,
         teamDetails: teamsList,
-        venueInfo: m.ground?.name || m.ground?.smallName || 'Venue TBA',
-        seriesName: m.series?.longName || m.series?.name || 'Tournament Series',
-        startTime,
+        status: m.statusText || m.statusEng || 'Scheduled',
         link,
-        matchInfo: m.title || 'Fixture'
+        raw: m
       });
     }
 
@@ -629,6 +678,8 @@ const MatchDataController = {
 
   getUpcomingMatches: async (req, res) => {
     let rawDate = req.query.date ? String(req.query.date).trim() : '';
+    const category = (req.query.category || req.query.tab || 'all').toLowerCase();
+    const format = req.query.format ? req.query.format.toUpperCase() : null;
     let formattedDate = '';
 
     if (rawDate && rawDate !== 'undefined') {
@@ -640,7 +691,7 @@ const MatchDataController = {
       }
     }
 
-    const cacheKey = `upcoming_matches_${formattedDate || 'all'}`;
+    const cacheKey = `upcoming_schedule_${category}_${format || 'all'}_${formattedDate || 'all'}`;
     if (!cacheService.isBypassed(req)) {
       const cached = cacheService.get(cacheKey);
       if (cached) {
@@ -649,86 +700,41 @@ const MatchDataController = {
     }
 
     try {
-      // 1. Ultra-fast direct ESPN Upcoming Fixtures API (< 300ms)
+      // 1. Primary Source: Official Cricinfo Schedule & Fixtures Feed (200+ matches)
+      const url = formattedDate
+        ? `https://www.espncricinfo.com/live-cricket-match-schedule-fixtures?date=${formattedDate}`
+        : 'https://www.espncricinfo.com/live-cricket-match-schedule-fixtures';
+
+      const html = await fetchPageHtml(url);
+      let response = extractUpcomingFromNextData(html);
+
+      if (response && response.length > 0) {
+        // Filter by category if requested
+        if (category && category !== 'all') {
+          response = response.filter((f) => f.category === category);
+        }
+
+        // Filter by format if requested
+        if (format && format !== 'ALL') {
+          response = response.filter((f) => (f.format || '').toUpperCase() === format);
+        }
+
+        // Cache upcoming matches for 10 minutes
+        cacheService.set(cacheKey, response, 10 * 60 * 1000);
+        return res.status(200).json(response);
+      }
+
+      // 2. Direct ESPN Scoreboard Header API Fallback
       const espnUpcoming = await fetchEspnUpcomingMatches(formattedDate || rawDate);
       if (espnUpcoming && espnUpcoming.length > 0) {
         cacheService.set(cacheKey, espnUpcoming, 10 * 60 * 1000);
         return res.status(200).json(espnUpcoming);
       }
 
-      // 2. Cricinfo Fallback
-      const url = formattedDate
-        ? `https://www.espncricinfo.com/live-cricket-match-schedule-fixtures?date=${formattedDate}`
-        : 'https://www.espncricinfo.com/live-cricket-match-schedule-fixtures';
-
-      const html = await fetchPageHtml(url);
-
-      // Try __NEXT_DATA__ first
-      const nextDataUpcoming = extractUpcomingFromNextData(html);
-      let response = nextDataUpcoming;
-
-      // Fall back to Cheerio if not in __NEXT_DATA__
-      if (!response || response.length === 0) {
-        const $ = cheerio.load(html);
-        response = [];
-
-        $('.ds-mb-6').each((i, dateBlock) => {
-          const date = $(dateBlock).find('span[class*="ds-text-tight-s"]').first().text().trim();
-
-          $(dateBlock)
-            .find('div.ds-bg-fill-content-prime')
-            .each((j, cardEl) => {
-              const teamsEl = $(cardEl).find('p.ds-text-compact-s').first();
-              let teams = teamsEl.clone().children().remove().end().text().trim();
-              if (!teams) teams = teamsEl.text().trim();
-              if (!teams) return;
-
-              const teamParts = teams.split(/\s+(?:vs|v)\s+/i);
-              const teamDetails = teamParts.map((tName) => {
-                const cleanName = tName.trim();
-                return {
-                  name: cleanName,
-                  flag: flagService.getFlag(cleanName)
-                };
-              });
-
-              const venueInfoFull = $(cardEl).find('div.ds-text-tight-xs').first().text().trim();
-              const venueParts = venueInfoFull.split(',');
-              const venueInfo = venueParts.slice(1).join(',').trim() || venueParts[0] || '';
-
-              const seriesLink = $(cardEl).find('a[href*="/series/"]').last();
-              const seriesName = seriesLink.attr('title') || seriesLink.text().trim();
-
-              const timeEl = $(cardEl).find('time').first();
-              const startTime = timeEl.text().trim() || $(cardEl).find('span[class*="ds-text-compact-xs"]').first().text().trim();
-
-              const linkEl = $(cardEl).find('a[href*="/live-cricket-score"], a[href*="/match/"]').first();
-              let link = linkEl.attr('href') || null;
-              if (link && !link.startsWith('http')) {
-                link = `https://www.espncricinfo.com${link}`;
-              }
-
-              response.push({
-                date,
-                teams,
-                teamDetails,
-                venueInfo,
-                seriesName,
-                startTime,
-                link,
-                matchInfo: 'Fixture'
-              });
-            });
-        });
-      }
-
-      // Cache upcoming matches for 10 minutes
-      cacheService.set(cacheKey, response, 10 * 60 * 1000);
-
-      res.status(200).json(response);
+      return res.status(200).json([]);
     } catch (err) {
       console.error('getUpcomingMatches error:', err.message);
-      res.status(500).json({ error: 'Scraping failed', message: err.message });
+      res.status(500).json({ error: 'Failed to retrieve upcoming schedule', message: err.message });
     }
   }
 };
