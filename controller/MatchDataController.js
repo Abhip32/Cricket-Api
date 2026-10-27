@@ -9,7 +9,7 @@ const flagService = require('../services/flagService');
  */
 async function fetchEspnLiveMatches() {
   try {
-    const url = 'https://site.web.api.espn.com/apis/personalized/v2/scoreboard/header?sport=cricket&region=in&tz=Asia/Kolkata';
+    const url = 'https://site.web.api.espn.com/apis/personalized/v2/scoreboard/header?sport=cricket';
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 4000);
     const res = await fetch(url, {
