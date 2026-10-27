@@ -3,11 +3,139 @@ const { fetchPageHtml } = require('../services/browserService');
 const cacheService = require('../services/cacheService');
 const flagService = require('../services/flagService');
 
+function extractIdsFromUrl(inputUrl) {
+  if (!inputUrl) return null;
+  const m1 = inputUrl.match(/series\/(\d+)\/game\/(\d+)/);
+  if (m1) return { leagueId: m1[1], eventId: m1[2] };
+  const m2 = inputUrl.match(/series\/[^\/]+-(\d+)\/[^\/]+-(\d+)/);
+  if (m2) return { leagueId: m2[1], eventId: m2[2] };
+  const m3 = inputUrl.match(/series\/(\d+)\/(\d+)/);
+  if (m3) return { leagueId: m3[1], eventId: m3[2] };
+  const matches = [...inputUrl.matchAll(/(\d{4,9})/g)].map((m) => m[1]);
+  if (matches.length >= 2) return { leagueId: matches[0], eventId: matches[1] };
+  return null;
+}
+
+function formatEspnScorecard(data) {
+  if (!data || !data.header) return null;
+
+  const comp = data.header.competitions?.[0] || {};
+  const statusType = comp.status?.type || {};
+  const competitors = comp.competitors || [];
+
+  const summary = {
+    matchTitle: data.header.description || data.header.name || 'Match Scorecard',
+    status: statusType.description || 'Live',
+    result: statusType.detail || comp.statusText || '',
+    venue: data.gameInfo?.venue?.fullName || '',
+    teams: competitors.map((c) => {
+      const name = c.team?.displayName || c.team?.name || 'Team';
+      const logo = c.team?.logos?.[0]?.href || c.team?.logo || flagService.getFlag(name);
+      return {
+        teamName: name,
+        teamLogo: logo,
+        score: c.score || '',
+        overs: c.overs || ''
+      };
+    })
+  };
+
+  const details = {};
+  if (data.gameInfo?.venue?.fullName) {
+    details['Venue'] = data.gameInfo.venue.fullName;
+  }
+  if (data.gameInfo?.officials && data.gameInfo.officials.length > 0) {
+    const umpires = data.gameInfo.officials
+      .filter((o) => o.position?.name?.includes('umpire') && !o.position?.name?.includes('reserve'))
+      .map((o) => o.displayName);
+    if (umpires.length > 0) details['Umpires'] = umpires.join(', ');
+
+    const ref = data.gameInfo.officials.find((o) => o.position?.name?.includes('referee'));
+    if (ref) details['Match Referee'] = ref.displayName;
+  }
+
+  const tables = [];
+
+  for (const mc of data.matchcards || []) {
+    if (mc.headline === 'Batting') {
+      const rows = (mc.playerDetails || []).map((p) => {
+        const runs = Number(p.runs) || 0;
+        const balls = Number(p.ballsFaced) || 0;
+        const sr = balls > 0 ? ((runs / balls) * 100).toFixed(1) : '-';
+        return {
+          Batting: p.playerName || 'Player',
+          col_1: p.dismissal || 'not out',
+          R: String(p.runs ?? '0'),
+          B: String(p.ballsFaced ?? '0'),
+          '4s': String(p.fours ?? '0'),
+          '6s': String(p.sixes ?? '0'),
+          SR: sr
+        };
+      });
+
+      tables.push({
+        title: `${mc.teamName || 'Team'} Batting`,
+        type: 'Batting',
+        headers: ['Batting', 'R', 'B', '4s', '6s', 'SR'],
+        rows,
+        extras: { total: mc.runs || '0', details: mc.extras || '' },
+        total: { score: mc.runs || '0', runs: mc.runs || '0', details: mc.total || '' }
+      });
+    } else if (mc.headline === 'Bowling') {
+      const rows = (mc.playerDetails || []).map((p) => {
+        return {
+          Bowling: p.playerName || 'Bowler',
+          O: String(p.overs ?? '0'),
+          M: String(p.maidens ?? '0'),
+          R: String(p.conceded ?? '0'),
+          W: String(p.wickets ?? '0'),
+          ECON: String(p.economyRate ?? '0.00')
+        };
+      });
+
+      tables.push({
+        title: `${mc.teamName || 'Opponent'} Bowling`,
+        type: 'Bowling',
+        headers: ['Bowling', 'O', 'M', 'R', 'W', 'ECON'],
+        rows
+      });
+    }
+  }
+
+  return {
+    message: 'Match scorecard retrieved successfully',
+    tableCount: tables.length,
+    data: {
+      summary,
+      details,
+      tables
+    }
+  };
+}
+
 const scoreCardController = {
   getScoreCard: async (req, res) => {
     let url = req.query.url;
 
     // Default to the first live or recent match if no URL is provided
+    if (!url) {
+      try {
+        const headerRes = await fetch('https://site.web.api.espn.com/apis/personalized/v2/scoreboard/header?sport=cricket', {
+          headers: { 'User-Agent': 'Mozilla/5.0' }
+        });
+        if (headerRes.ok) {
+          const headerJson = await headerRes.json();
+          const firstLeague = headerJson.sports?.[0]?.leagues?.[0];
+          const firstEvent = firstLeague?.events?.[0];
+          if (firstLeague?.id && firstEvent?.id) {
+            url = `https://www.espn.in/cricket/series/${firstLeague.id}/game/${firstEvent.id}`;
+          }
+        }
+      } catch (e) {
+        // ignore
+      }
+    }
+
     if (!url) {
       try {
         const liveHtml = await fetchPageHtml('https://www.espncricinfo.com/live-cricket-score');
@@ -49,7 +177,7 @@ const scoreCardController = {
       }
       url = url.replace(/\/live-cricket-score$/, '/full-scorecard');
       url = url.replace(/\/match-preview$/, '/full-scorecard');
-      if (!url.endsWith('/full-scorecard') && !url.includes('?')) {
+      if (!url.endsWith('/full-scorecard') && !url.includes('?') && !url.includes('/game/')) {
         url = `${url.replace(/\/+$/, '')}/full-scorecard`;
       }
     }
@@ -66,6 +194,34 @@ const scoreCardController = {
       const cached = cacheService.get(cacheKey);
       if (cached) {
         return res.status(200).json(cached);
+      }
+    }
+
+    // 1. Ultra-fast direct ESPN Summary API (< 300ms, immune to Akamai 403 on Vercel)
+    const ids = extractIdsFromUrl(url);
+    if (ids && ids.leagueId && ids.eventId) {
+      try {
+        const espnSummaryUrl = `https://site.web.api.espn.com/apis/site/v2/sports/cricket/${ids.leagueId}/summary?event=${ids.eventId}`;
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 4000);
+        const rawRes = await fetch(espnSummaryUrl, {
+          signal: controller.signal,
+          headers: { 'User-Agent': 'Mozilla/5.0' }
+        });
+        clearTimeout(timer);
+        if (rawRes.ok) {
+          const rawJson = await rawRes.json();
+          const formatted = formatEspnScorecard(rawJson);
+          if (formatted && formatted.data && formatted.data.tables.length > 0) {
+            const isCompleted =
+              formatted.data.summary.status?.toLowerCase().includes('result') ||
+              formatted.data.summary.status?.toLowerCase().includes('final');
+            cacheService.set(cacheKey, formatted, isCompleted ? 30 * 60 * 1000 : 45 * 1000);
+            return res.status(200).json(formatted);
+          }
+        }
+      } catch (espnErr) {
+        // Fall back to HTML scraping
       }
     }
 

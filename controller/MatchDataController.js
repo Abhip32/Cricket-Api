@@ -69,6 +69,189 @@ async function fetchEspnLiveMatches() {
 }
 
 /**
+ * Ultra-fast direct ESPN Recent Matches API (< 300ms)
+ * Immune to Akamai 403 blocks on Vercel / Cloud lambdas.
+ */
+async function fetchEspnRecentMatches() {
+  try {
+    const dates = [];
+    const now = new Date();
+    for (let i = 0; i <= 2; i++) {
+      const d = new Date(now.getTime() - i * 24 * 60 * 60 * 1000);
+      const yyyy = d.getUTCFullYear();
+      const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
+      const dd = String(d.getUTCDate()).padStart(2, '0');
+      dates.push(`${yyyy}${mm}${dd}`);
+    }
+
+    const seriesMap = new Map();
+
+    await Promise.all(
+      dates.map(async (dt) => {
+        try {
+          const url = `https://site.web.api.espn.com/apis/personalized/v2/scoreboard/header?sport=cricket&dates=${dt}`;
+          const controller = new AbortController();
+          const timer = setTimeout(() => controller.abort(), 3500);
+          const res = await fetch(url, {
+            signal: controller.signal,
+            headers: { 'User-Agent': 'Mozilla/5.0' }
+          });
+          clearTimeout(timer);
+          if (!res.ok) return;
+          const json = await res.json();
+          const leagues = json.sports?.[0]?.leagues || [];
+
+          for (const l of leagues) {
+            const seriesTitle = l.name || 'Cricket Series';
+            if (!seriesMap.has(seriesTitle)) {
+              seriesMap.set(seriesTitle, []);
+            }
+
+            for (const ev of l.events || []) {
+              const state = ev.fullStatus?.type?.state;
+              if (
+                state === 'post' ||
+                ev.status === 'post' ||
+                ev.fullStatus?.type?.name?.includes('FINAL') ||
+                ev.fullStatus?.type?.name?.includes('RESULT')
+              ) {
+                const competitors = ev.competitors || [];
+                const teams = competitors.map((c) => {
+                  const name = c.displayName || c.name || 'Team';
+                  const flag = c.logo || flagService.getFlag(name);
+                  if (name && flag) {
+                    flagService.registerFlag(name, flag);
+                  }
+                  return {
+                    name,
+                    score: c.score || '',
+                    overs: '',
+                    target: '',
+                    fullScore: c.score || '',
+                    flag
+                  };
+                });
+
+                const link = ev.links?.[0]?.href || `https://www.espn.in/cricket/series/${l.id}/game/${ev.id}`;
+                seriesMap.get(seriesTitle).push({
+                  link,
+                  status: ev.fullStatus?.type?.description || 'RESULT',
+                  matchInfo: ev.name || '',
+                  teams,
+                  result: ev.statusText || ev.fullStatus?.type?.detail || ''
+                });
+              }
+            }
+          }
+        } catch (e) {}
+      })
+    );
+
+    const response = [];
+    for (const [series, matches] of seriesMap.entries()) {
+      if (matches.length > 0) {
+        response.push({ series, matches });
+      }
+    }
+    return response.length > 0 ? response : null;
+  } catch (err) {
+    return null;
+  }
+}
+
+/**
+ * Ultra-fast direct ESPN Upcoming Fixtures API (< 300ms)
+ * Immune to Akamai 403 blocks on Vercel / Cloud lambdas.
+ */
+async function fetchEspnUpcomingMatches(reqDate) {
+  try {
+    const dates = [];
+    if (reqDate) {
+      let cleaned = reqDate.replace(/-/g, '');
+      if (cleaned.length === 8 && /^\d{8}$/.test(cleaned)) {
+        if (Number(cleaned.slice(0, 2)) > 1900) {
+          dates.push(cleaned);
+        } else {
+          const dd = cleaned.slice(0, 2);
+          const mm = cleaned.slice(2, 4);
+          const yyyy = cleaned.slice(4, 8);
+          dates.push(`${yyyy}${mm}${dd}`);
+        }
+      }
+    }
+
+    if (dates.length === 0) {
+      const now = new Date();
+      for (let i = 0; i <= 3; i++) {
+        const d = new Date(now.getTime() + i * 24 * 60 * 60 * 1000);
+        const yyyy = d.getUTCFullYear();
+        const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
+        const dd = String(d.getUTCDate()).padStart(2, '0');
+        dates.push(`${yyyy}${mm}${dd}`);
+      }
+    }
+
+    const fixtures = [];
+
+    await Promise.all(
+      dates.map(async (dt) => {
+        try {
+          const url = `https://site.web.api.espn.com/apis/personalized/v2/scoreboard/header?sport=cricket&dates=${dt}`;
+          const controller = new AbortController();
+          const timer = setTimeout(() => controller.abort(), 3500);
+          const res = await fetch(url, {
+            signal: controller.signal,
+            headers: { 'User-Agent': 'Mozilla/5.0' }
+          });
+          clearTimeout(timer);
+          if (!res.ok) return;
+          const json = await res.json();
+          const leagues = json.sports?.[0]?.leagues || [];
+
+          for (const l of leagues) {
+            const seriesName = l.name || 'Cricket Series';
+            for (const ev of l.events || []) {
+              const state = ev.fullStatus?.type?.state;
+              if (state === 'pre' || ev.status === 'pre' || ev.fullStatus?.type?.name?.includes('SCHEDULED')) {
+                const competitors = ev.competitors || [];
+                const teamDetails = competitors.map((c) => {
+                  const name = c.displayName || c.name || 'Team';
+                  const flag = c.logo || flagService.getFlag(name);
+                  if (name && flag) flagService.registerFlag(name, flag);
+                  return { name, flag };
+                });
+                const teams = teamDetails.map((t) => t.name).join(' vs ');
+                const link = ev.links?.[0]?.href || `https://www.espn.in/cricket/series/${l.id}/game/${ev.id}`;
+                const venueInfo = ev.venue?.fullName || l.name || '';
+                const startTime = ev.date
+                  ? new Date(ev.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                  : 'Upcoming';
+                const dateStr = ev.date ? new Date(ev.date).toDateString() : dt;
+
+                fixtures.push({
+                  date: dateStr,
+                  teams,
+                  teamDetails,
+                  venueInfo,
+                  seriesName,
+                  startTime,
+                  link,
+                  matchInfo: ev.name || 'Fixture'
+                });
+              }
+            }
+          }
+        } catch (e) {}
+      })
+    );
+
+    return fixtures.length > 0 ? fixtures : null;
+  } catch (err) {
+    return null;
+  }
+}
+
+/**
  * Ultra-fast direct __NEXT_DATA__ JSON extraction (< 20ms)
  * Cricinfo SSR pre-renders all matches, scores, and official CDN flags into script#__NEXT_DATA__
  */
@@ -388,6 +571,14 @@ const MatchDataController = {
     }
 
     try {
+      // 1. Ultra-fast direct ESPN Recent Matches API (< 300ms)
+      const espnRecent = await fetchEspnRecentMatches();
+      if (espnRecent && espnRecent.length > 0) {
+        cacheService.set(cacheKey, espnRecent, 5 * 60 * 1000);
+        return res.status(200).json(espnRecent);
+      }
+
+      // 2. Cricinfo Fallback
       const html = await fetchPageHtml('https://www.espncricinfo.com/live-cricket-match-results');
       const data = extractSeriesMatches(html);
 
@@ -423,17 +614,25 @@ const MatchDataController = {
     }
 
     try {
+      // 1. Ultra-fast direct ESPN Upcoming Fixtures API (< 300ms)
+      const espnUpcoming = await fetchEspnUpcomingMatches(formattedDate || rawDate);
+      if (espnUpcoming && espnUpcoming.length > 0) {
+        cacheService.set(cacheKey, espnUpcoming, 10 * 60 * 1000);
+        return res.status(200).json(espnUpcoming);
+      }
+
+      // 2. Cricinfo Fallback
       const url = formattedDate
         ? `https://www.espncricinfo.com/live-cricket-match-schedule-fixtures?date=${formattedDate}`
         : 'https://www.espncricinfo.com/live-cricket-match-schedule-fixtures';
 
       const html = await fetchPageHtml(url);
 
-      // 1. Try __NEXT_DATA__ first
+      // Try __NEXT_DATA__ first
       const nextDataUpcoming = extractUpcomingFromNextData(html);
       let response = nextDataUpcoming;
 
-      // 2. Fall back to Cheerio if not in __NEXT_DATA__
+      // Fall back to Cheerio if not in __NEXT_DATA__
       if (!response || response.length === 0) {
         const $ = cheerio.load(html);
         response = [];
