@@ -7,9 +7,12 @@ const flagService = require('../services/flagService');
  * Ultra-fast direct ESPN Scoreboard Header API (< 100ms)
  * Immune to Akamai 403 blocks on Vercel / Cloud lambdas.
  */
-async function fetchEspnLiveMatches() {
+async function fetchEspnLiveMatches(options = {}) {
   try {
-    const url = 'https://site.web.api.espn.com/apis/personalized/v2/scoreboard/header?sport=cricket';
+    let url = 'https://site.web.api.espn.com/apis/personalized/v2/scoreboard/header?sport=cricket';
+    if (options.league) url += `&league=${encodeURIComponent(options.league)}`;
+    if (options.group) url += `&group=${encodeURIComponent(options.group)}`;
+    if (options.region) url += `&region=${encodeURIComponent(options.region)}`;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 4000);
     const res = await fetch(url, {
@@ -89,7 +92,7 @@ async function fetchEspnLiveMatches() {
  * Ultra-fast direct ESPN Recent Matches API (< 300ms)
  * Immune to Akamai 403 blocks on Vercel / Cloud lambdas.
  */
-async function fetchEspnRecentMatches() {
+async function fetchEspnRecentMatches(options = {}) {
   try {
     const dates = [];
     const now = new Date();
@@ -106,7 +109,10 @@ async function fetchEspnRecentMatches() {
     await Promise.all(
       dates.map(async (dt) => {
         try {
-          const url = `https://site.web.api.espn.com/apis/personalized/v2/scoreboard/header?sport=cricket&dates=${dt}`;
+          let url = `https://site.web.api.espn.com/apis/personalized/v2/scoreboard/header?sport=cricket&dates=${dt}`;
+          if (options.league) url += `&league=${encodeURIComponent(options.league)}`;
+          if (options.group) url += `&group=${encodeURIComponent(options.group)}`;
+          if (options.region) url += `&region=${encodeURIComponent(options.region)}`;
           const controller = new AbortController();
           const timer = setTimeout(() => controller.abort(), 3500);
           const res = await fetch(url, {
@@ -197,7 +203,7 @@ async function fetchEspnRecentMatches() {
  * Ultra-fast direct ESPN Upcoming Fixtures API (< 300ms)
  * Immune to Akamai 403 blocks on Vercel / Cloud lambdas.
  */
-async function fetchEspnUpcomingMatches(reqDate) {
+async function fetchEspnUpcomingMatches(reqDate, options = {}) {
   try {
     const dates = [];
     if (reqDate) {
@@ -231,7 +237,10 @@ async function fetchEspnUpcomingMatches(reqDate) {
     await Promise.all(
       dates.map(async (dt) => {
         try {
-          const url = `https://site.web.api.espn.com/apis/personalized/v2/scoreboard/header?sport=cricket&dates=${dt}`;
+          let url = `https://site.web.api.espn.com/apis/personalized/v2/scoreboard/header?sport=cricket&dates=${dt}`;
+          if (options.league) url += `&league=${encodeURIComponent(options.league)}`;
+          if (options.group) url += `&group=${encodeURIComponent(options.group)}`;
+          if (options.region) url += `&region=${encodeURIComponent(options.region)}`;
           const controller = new AbortController();
           const timer = setTimeout(() => controller.abort(), 4000);
           const res = await fetch(url, {
@@ -618,7 +627,12 @@ function extractSeriesMatches(html) {
 
 const MatchDataController = {
   getLiveMatches: async (req, res) => {
-    const cacheKey = 'live_matches';
+    const league = req.query.league || req.query.leagueId || '';
+    const group = req.query.group || '';
+    const region = req.query.region || '';
+    const options = { league, group, region };
+
+    const cacheKey = `live_matches_${league || 'all'}_${group || 'all'}_${region || 'all'}`;
     if (!cacheService.isBypassed(req)) {
       const cached = cacheService.get(cacheKey);
       if (cached) {
@@ -628,7 +642,7 @@ const MatchDataController = {
 
     try {
       // 1. Ultra-fast direct ESPN API (< 100ms, immune to Akamai 403 on cloud/Vercel)
-      const espnData = await fetchEspnLiveMatches();
+      const espnData = await fetchEspnLiveMatches(options);
       if (espnData && espnData.length > 0) {
         cacheService.set(cacheKey, espnData, 45 * 1000);
         return res.status(200).json(espnData);
@@ -649,7 +663,12 @@ const MatchDataController = {
   },
 
   getRecentMatches: async (req, res) => {
-    const cacheKey = 'recent_matches';
+    const league = req.query.league || req.query.leagueId || '';
+    const group = req.query.group || '';
+    const region = req.query.region || '';
+    const options = { league, group, region };
+
+    const cacheKey = `recent_matches_${league || 'all'}_${group || 'all'}_${region || 'all'}`;
     if (!cacheService.isBypassed(req)) {
       const cached = cacheService.get(cacheKey);
       if (cached) {
@@ -659,7 +678,7 @@ const MatchDataController = {
 
     try {
       // 1. Ultra-fast direct ESPN Recent Matches API (< 300ms)
-      const espnRecent = await fetchEspnRecentMatches();
+      const espnRecent = await fetchEspnRecentMatches(options);
       if (espnRecent && espnRecent.length > 0) {
         cacheService.set(cacheKey, espnRecent, 5 * 60 * 1000);
         return res.status(200).json(espnRecent);
@@ -683,8 +702,12 @@ const MatchDataController = {
     let rawDate = req.query.date ? String(req.query.date).trim() : '';
     const category = (req.query.category || req.query.tab || 'all').toLowerCase();
     const format = req.query.format ? req.query.format.toUpperCase() : null;
+    const league = req.query.league || req.query.leagueId || '';
+    const group = req.query.group || '';
+    const region = req.query.region || '';
+    const options = { league, group, region };
 
-    const cacheKey = `espn_upcoming_only_${rawDate || 'all'}_${category}_${format || 'all'}`;
+    const cacheKey = `espn_upcoming_only_${rawDate || 'all'}_${category}_${format || 'all'}_${league || 'all'}_${group || 'all'}_${region || 'all'}`;
     if (!cacheService.isBypassed(req)) {
       const cached = cacheService.get(cacheKey);
       if (cached) {
@@ -694,7 +717,7 @@ const MatchDataController = {
 
     try {
       // 100% Direct ESPN Official Header API (< 250ms)
-      let espnUpcoming = await fetchEspnUpcomingMatches(rawDate);
+      let espnUpcoming = await fetchEspnUpcomingMatches(rawDate, options);
       if (espnUpcoming && espnUpcoming.length > 0) {
         if (category && category !== 'all') {
           espnUpcoming = espnUpcoming.filter((f) =>

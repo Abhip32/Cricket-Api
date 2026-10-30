@@ -3,8 +3,48 @@ const { fetchPageHtml } = require('../services/browserService');
 const cacheService = require('../services/cacheService');
 
 /**
- * Ultra-fast RSS XML parser (< 300ms)
+ * Ultra-fast direct ESPN Official News API (< 120ms)
  * Immune to Akamai 403 blocks on Vercel
+ * Supports global cricket news (leagueId: '0') or specific tournament news (e.g. IPL 8048)
+ */
+async function fetchEspnApiNews(leagueId = '0') {
+  try {
+    const cleanId = String(leagueId).trim();
+    const url = `https://site.web.api.espn.com/apis/site/v2/sports/cricket/${cleanId}/news`;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 4000);
+    const res = await fetch(url, {
+      signal: controller.signal,
+      headers: { 'User-Agent': 'Mozilla/5.0' }
+    });
+    clearTimeout(timer);
+    if (!res.ok) return null;
+    const data = await res.json();
+    const rawArticles = data.articles || [];
+    if (rawArticles.length === 0) return null;
+
+    return rawArticles.map((a) => {
+      const img = a.images?.[0]?.url || null;
+      return {
+        title: a.headline || '',
+        headline: a.headline || '',
+        description: a.description || '',
+        image: img,
+        date: a.published || '',
+        dateTime: a.published || '',
+        author: a.byline || 'ESPNcricinfo staff',
+        link: a.links?.web?.href || a.links?.mobile?.href || null,
+        categories: (a.categories || []).map((c) => c.description || c.type),
+        raw: a
+      };
+    });
+  } catch (e) {
+    return null;
+  }
+}
+
+/**
+ * Ultra-fast RSS XML parser (< 300ms) fallback
  */
 async function fetchRssNews() {
   try {
@@ -31,11 +71,13 @@ async function fetchRssNews() {
 
       newsList.push({
         title,
-        link,
+        headline: title,
         description,
         image,
         date: pubDate,
+        dateTime: pubDate,
         author,
+        link,
         raw: {
           title,
           link,
@@ -55,7 +97,9 @@ async function fetchRssNews() {
 
 const newsController = {
   getNews: async (req, res) => {
-    const cacheKey = 'cricket_news';
+    const leagueId = req.query.leagueId || req.query.league || '0';
+    const cacheKey = `cricket_news_${leagueId}`;
+
     if (!cacheService.isBypassed(req)) {
       const cached = cacheService.get(cacheKey);
       if (cached) {
@@ -64,14 +108,21 @@ const newsController = {
     }
 
     try {
-      // 1. Try ultra-fast RSS news feed first (~300ms, immune to Akamai 403 on Vercel)
+      // 1. Direct ESPN Official News API (Instant, structured, high-res images)
+      const espnNews = await fetchEspnApiNews(leagueId);
+      if (espnNews && espnNews.length > 0) {
+        cacheService.set(cacheKey, espnNews, 10 * 60 * 1000);
+        return res.status(200).json(espnNews);
+      }
+
+      // 2. RSS news feed fallback (~300ms)
       const rssNews = await fetchRssNews();
       if (rssNews && rssNews.length > 0) {
         cacheService.set(cacheKey, rssNews, 10 * 60 * 1000);
         return res.status(200).json(rssNews);
       }
 
-      // 2. Fall back to HTML scraping
+      // 3. Fall back to HTML scraping
       const html = await fetchPageHtml('https://www.espncricinfo.com/cricket-news');
       const $ = cheerio.load(html);
       const newsList = [];
@@ -84,7 +135,7 @@ const newsController = {
         const title = titleEl.text().trim();
         if (!title) return;
 
-        // Article Link - ensure clean absolute URL
+        // Article Link
         const linkEl = $card.find('a[href*="/story/"], a').first();
         let link = linkEl.attr('href') || null;
         if (link && !link.startsWith('http')) {
@@ -100,7 +151,6 @@ const newsController = {
         if (descDiv.length) {
           description = descDiv.text().trim();
         } else {
-          // Fallback description
           $card.find('p[class*="ds-text-compact-s"], p.ds-text-tight-m').each((_, p) => {
             const t = $(p).text().trim();
             if (t && t !== title && !description) {
@@ -123,7 +173,7 @@ const newsController = {
           }
         });
 
-        // Image extraction - resolve data-src, srcset, or src; ignore SVG lazy placeholders
+        // Image extraction
         let image = null;
         const img = $card.find('img').first();
         if (img.length) {
@@ -146,6 +196,7 @@ const newsController = {
 
         newsList.push({
           title,
+          headline: title,
           description,
           dateTime,
           author,
@@ -154,9 +205,7 @@ const newsController = {
         });
       });
 
-      // Cache news for 10 minutes
       cacheService.set(cacheKey, newsList, 10 * 60 * 1000);
-
       res.status(200).json(newsList);
     } catch (err) {
       console.error('getNews error:', err.message);

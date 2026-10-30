@@ -3,6 +3,20 @@ const { fetchPageHtml } = require('../services/browserService');
 const cacheService = require('../services/cacheService');
 const flagService = require('../services/flagService');
 
+function decodeHtmlEntities(str) {
+  if (!str || typeof str !== 'string') return '';
+  return str
+    .replace(/&dagger;/g, '†')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&nbsp;/g, ' ')
+    .replace(/►/g, '')
+    .trim();
+}
+
 function extractIdsFromUrl(inputUrl) {
   if (!inputUrl) return null;
   const m1 = inputUrl.match(/series\/(\d+)\/game\/(\d+)/);
@@ -16,11 +30,64 @@ function extractIdsFromUrl(inputUrl) {
   return null;
 }
 
-async function fetchEspnCommentary(leagueId, eventId) {
+async function resolveMatchIds(req) {
+  let leagueId = req.query.leagueId || req.params.leagueId;
+  let eventId = req.query.eventId || req.params.eventId || req.params.id;
+
+  if (leagueId && eventId) {
+    return { leagueId: String(leagueId).trim(), eventId: String(eventId).trim() };
+  }
+
+  let inputUrl = req.query.url;
+  if (inputUrl) {
+    const ids = extractIdsFromUrl(inputUrl);
+    if (ids) return ids;
+  }
+
+  // Fallback discovery to latest active match from scoreboard header
   try {
-    const url = `https://site.web.api.espn.com/apis/site/v2/sports/cricket/${leagueId}/playbyplay?event=${eventId}`;
+    const headerRes = await fetch(
+      'https://site.web.api.espn.com/apis/personalized/v2/scoreboard/header?sport=cricket',
+      { headers: { 'User-Agent': 'Mozilla/5.0' } }
+    );
+    if (headerRes.ok) {
+      const headerJson = await headerRes.json();
+      const firstLeague = headerJson.sports?.[0]?.leagues?.[0];
+      const firstEvent = firstLeague?.events?.[0];
+      if (firstLeague?.id && firstEvent?.id) {
+        return { leagueId: String(firstLeague.id), eventId: String(firstEvent.id) };
+      }
+    }
+  } catch (e) {}
+
+  return null;
+}
+
+async function fetchEspnSummaryRaw(leagueId, eventId) {
+  try {
+    const url = `https://site.web.api.espn.com/apis/site/v2/sports/cricket/${leagueId}/summary?event=${eventId}`;
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 4000);
+    const timer = setTimeout(() => controller.abort(), 4500);
+    const res = await fetch(url, {
+      signal: controller.signal,
+      headers: { 'User-Agent': 'Mozilla/5.0' }
+    });
+    clearTimeout(timer);
+    if (!res.ok) return null;
+    return await res.json();
+  } catch (e) {
+    return null;
+  }
+}
+
+async function fetchEspnCommentary(leagueId, eventId, limit = 100, page = 1, period = null) {
+  try {
+    let url = `https://site.web.api.espn.com/apis/site/v2/sports/cricket/${leagueId}/playbyplay?event=${eventId}&limit=${limit}&page=${page}`;
+    if (period) {
+      url += `&period=${period}`;
+    }
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 4500);
     const res = await fetch(url, {
       signal: controller.signal,
       headers: { 'User-Agent': 'Mozilla/5.0' }
@@ -29,27 +96,37 @@ async function fetchEspnCommentary(leagueId, eventId) {
     if (!res.ok) return [];
     const json = await res.json();
     const items = json.commentary?.items || [];
-    return items.map((item) => ({
-      id: item.id,
-      over: item.over?.overs || item.over?.actual || 0,
-      ball: item.over?.ball || 0,
-      shortText: item.shortText || '',
-      text: item.text || item.shortText || '',
-      runs: item.scoreValue ?? 0,
-      isWicket: Boolean(
+    return items.map((item) => {
+      const isWicket = Boolean(
         item.dismissal?.dismissal ||
         item.playType?.description?.toLowerCase().includes('out') ||
         item.shortText?.toLowerCase().includes('out')
-      ),
-      dismissal: item.dismissal?.text || '',
-      bowler: item.bowler?.athlete?.displayName || '',
-      batsman: item.batsman?.athlete?.displayName || '',
-      team: item.team?.displayName || item.team?.name || '',
-      period: item.periodText || `Innings ${item.period || 1}`,
-      preText: item.preText || '',
-      postText: item.postText || '',
-      timestamp: item.date || null
-    }));
+      );
+      const bowler = decodeHtmlEntities(item.bowler?.athlete?.displayName || '');
+      const batsman = decodeHtmlEntities(item.batsman?.athlete?.displayName || '');
+      const mediaId = item.mediaId && item.mediaId !== 0 ? item.mediaId : null;
+      return {
+        id: item.id,
+        over: item.over?.overs || item.over?.actual || 0,
+        ball: item.over?.ball || 0,
+        shortText: decodeHtmlEntities(item.shortText || ''),
+        text: decodeHtmlEntities(item.text || item.shortText || ''),
+        runs: item.scoreValue ?? 0,
+        isWicket,
+        wicket: isWicket,
+        dismissal: decodeHtmlEntities(item.dismissal?.text || ''),
+        bowler,
+        batsman,
+        batter: batsman,
+        team: item.team?.displayName || item.team?.name || '',
+        period: item.periodText || `Innings ${item.period || 1}`,
+        preText: decodeHtmlEntities(item.preText || ''),
+        postText: decodeHtmlEntities(item.postText || ''),
+        mediaId,
+        videoClipUrl: mediaId ? `https://www.espn.com/video/clip/_/id/${mediaId}` : null,
+        timestamp: item.date || null
+      };
+    });
   } catch (e) {
     return [];
   }
@@ -310,6 +387,86 @@ function formatEspnScorecard(data) {
     }
   }
 
+  // Extract Innings Partnerships, Fall of Wickets, and DRS Reviews
+  const inningsPartnerships = [];
+  const inningsFow = [];
+  const drsReviews = [];
+
+  for (const c of competitors) {
+    const teamName = c.team?.displayName || c.team?.name || 'Team';
+    for (const ls of c.linescores || []) {
+      const innPeriod = ls.period || 1;
+      const innScore = `${ls.runs || 0}/${ls.wickets || 0}`;
+      const innOvers = ls.overs || '0';
+
+      if (ls.partnerships && ls.partnerships.length > 0) {
+        inningsPartnerships.push({
+          team: teamName,
+          period: innPeriod,
+          score: innScore,
+          overs: innOvers,
+          partnerships: ls.partnerships.map((p) => ({
+            wicketNumber: p.wicketNumber,
+            wicketName: p.wicketName,
+            runs: p.runs,
+            overs: p.overs,
+            runRate: p.runRate,
+            start: p.start,
+            end: p.end,
+            batsmen: (p.batsmen || []).map((b) => ({
+              id: b.athlete?.id,
+              name: b.athlete?.displayName || b.athlete?.name,
+              runs: b.runs,
+              balls: b.balls,
+              headshot:
+                b.athlete?.headshot?.href ||
+                (b.athlete?.id ? `https://a.espncdn.com/i/headshots/cricket/players/full/${b.athlete.id}.png` : null)
+            }))
+          }))
+        });
+      }
+
+      if (ls.fow && ls.fow.length > 0) {
+        inningsFow.push({
+          team: teamName,
+          period: innPeriod,
+          score: innScore,
+          overs: innOvers,
+          fallOfWickets: ls.fow.map((f) => ({
+            wicketNumber: f.wicketNumber,
+            wicketOver: f.wicketOver,
+            runs: f.runs,
+            runsScored: f.runsScored,
+            ballsFaced: f.ballsFaced,
+            fowType: f.fowType,
+            batsman: {
+              id: f.athlete?.id,
+              name: f.athlete?.displayName || f.athlete?.name,
+              position: f.athlete?.position?.abbreviation,
+              headshot:
+                f.athlete?.headshot?.href ||
+                (f.athlete?.id ? `https://a.espncdn.com/i/headshots/cricket/players/full/${f.athlete.id}.png` : null)
+            }
+          }))
+        });
+      }
+
+      if (ls.reviews) {
+        drsReviews.push({
+          team: teamName,
+          period: innPeriod,
+          reviews: ls.reviews
+        });
+      }
+    }
+  }
+
+  const tossNote = (data.notes || []).find((n) => n.type === 'toss')?.text || '';
+  if (tossNote) {
+    summary.toss = tossNote;
+    details['Toss'] = tossNote;
+  }
+
   return {
     message: 'Match scorecard retrieved successfully',
     tableCount: tables.length,
@@ -318,6 +475,9 @@ function formatEspnScorecard(data) {
       details,
       squads,
       tables,
+      partnerships: inningsPartnerships,
+      fallOfWickets: inningsFow,
+      drsReviews,
       leaders: data.leaders || [],
       gameInfo: data.gameInfo || {},
       notes: data.notes || [],
@@ -816,39 +976,549 @@ const scoreCardController = {
   },
 
   getCommentary: async (req, res) => {
-    let url = req.query.url;
-    if (!url) {
-      try {
-        const headerRes = await fetch(
-          'https://site.web.api.espn.com/apis/personalized/v2/scoreboard/header?sport=cricket',
-          { headers: { 'User-Agent': 'Mozilla/5.0' } }
-        );
-        if (headerRes.ok) {
-          const headerJson = await headerRes.json();
-          const firstLeague = headerJson.sports?.[0]?.leagues?.[0];
-          const firstEvent = firstLeague?.events?.[0];
-          if (firstLeague?.id && firstEvent?.id) {
-            url = `https://www.espn.in/cricket/series/${firstLeague.id}/game/${firstEvent.id}`;
-          }
+    const ids = await resolveMatchIds(req);
+    if (!ids || !ids.leagueId || !ids.eventId) {
+      return res.status(400).json({
+        error: 'No match identified',
+        message: 'Provide ?leagueId=...&eventId=... or ?url=...'
+      });
+    }
+
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 100, 1), 300);
+    const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+    const period = req.query.period ? parseInt(req.query.period, 10) : null;
+
+    const cacheKey = `commentary_${ids.leagueId}_${ids.eventId}_${limit}_${page}_${period || 'all'}`;
+    if (!cacheService.isBypassed(req)) {
+      const cached = cacheService.get(cacheKey);
+      if (cached) return res.status(200).json(cached);
+    }
+
+    const commentary = await fetchEspnCommentary(ids.leagueId, ids.eventId, limit, page, period);
+    cacheService.set(cacheKey, commentary, 30 * 1000); // 30s TTL
+    return res.status(200).json(commentary);
+  },
+
+  getPartnerships: async (req, res) => {
+    const ids = await resolveMatchIds(req);
+    if (!ids || !ids.leagueId || !ids.eventId) {
+      return res.status(400).json({
+        error: 'No match identified',
+        message: 'Provide ?leagueId=...&eventId=... or ?url=...'
+      });
+    }
+
+    const cacheKey = `partnerships_${ids.leagueId}_${ids.eventId}`;
+    if (!cacheService.isBypassed(req)) {
+      const cached = cacheService.get(cacheKey);
+      if (cached) return res.status(200).json(cached);
+    }
+
+    const raw = await fetchEspnSummaryRaw(ids.leagueId, ids.eventId);
+    if (!raw) {
+      return res.status(500).json({ error: 'Failed to retrieve match summary from ESPN' });
+    }
+
+    const competitors = raw.header?.competitions?.[0]?.competitors || [];
+    const inningsPartnerships = [];
+
+    for (const c of competitors) {
+      const teamName = c.team?.displayName || c.team?.name || 'Team';
+      for (const ls of c.linescores || []) {
+        if (ls.partnerships && ls.partnerships.length > 0) {
+          inningsPartnerships.push({
+            team: teamName,
+            period: ls.period || 1,
+            score: `${ls.runs || 0}/${ls.wickets || 0}`,
+            overs: ls.overs || '0',
+            partnerships: ls.partnerships.map((p) => ({
+              wicketNumber: p.wicketNumber,
+              wicketName: p.wicketName,
+              runs: p.runs,
+              overs: p.overs,
+              runRate: p.runRate,
+              start: p.start,
+              end: p.end,
+              batsmen: (p.batsmen || []).map((b) => ({
+                id: b.athlete?.id || null,
+                name: b.athlete?.displayName || b.athlete?.name || 'Player',
+                runs: b.runs,
+                balls: b.balls,
+                headshot:
+                  b.athlete?.headshot?.href ||
+                  (b.athlete?.id ? `https://a.espncdn.com/i/headshots/cricket/players/full/${b.athlete.id}.png` : null)
+              }))
+            }))
+          });
         }
-      } catch (e) {}
+      }
     }
 
-    if (!url) {
-      return res.status(400).json({ error: 'No match URL provided' });
+    const response = {
+      leagueId: ids.leagueId,
+      eventId: ids.eventId,
+      matchTitle: raw.header?.description || raw.header?.name || 'Cricket Match',
+      inningsCount: inningsPartnerships.length,
+      innings: inningsPartnerships
+    };
+
+    cacheService.set(cacheKey, response, 45 * 1000);
+    return res.status(200).json(response);
+  },
+
+  getFallOfWickets: async (req, res) => {
+    const ids = await resolveMatchIds(req);
+    if (!ids || !ids.leagueId || !ids.eventId) {
+      return res.status(400).json({
+        error: 'No match identified',
+        message: 'Provide ?leagueId=...&eventId=... or ?url=...'
+      });
     }
 
-    const ids = extractIdsFromUrl(url);
-    if (ids && ids.leagueId && ids.eventId) {
-      const commentary = await fetchEspnCommentary(ids.leagueId, ids.eventId);
-      return res.status(200).json(commentary);
+    const cacheKey = `fow_${ids.leagueId}_${ids.eventId}`;
+    if (!cacheService.isBypassed(req)) {
+      const cached = cacheService.get(cacheKey);
+      if (cached) return res.status(200).json(cached);
     }
 
-    return res.status(200).json([]);
+    const raw = await fetchEspnSummaryRaw(ids.leagueId, ids.eventId);
+    if (!raw) {
+      return res.status(500).json({ error: 'Failed to retrieve match summary from ESPN' });
+    }
+
+    const competitors = raw.header?.competitions?.[0]?.competitors || [];
+    const inningsFow = [];
+
+    for (const c of competitors) {
+      const teamName = c.team?.displayName || c.team?.name || 'Team';
+      for (const ls of c.linescores || []) {
+        if (ls.fow && ls.fow.length > 0) {
+          inningsFow.push({
+            team: teamName,
+            period: ls.period || 1,
+            score: `${ls.runs || 0}/${ls.wickets || 0}`,
+            overs: ls.overs || '0',
+            fallOfWickets: ls.fow.map((f) => ({
+              wicketNumber: f.wicketNumber,
+              wicketOver: f.wicketOver,
+              runs: f.runs,
+              runsScored: f.runsScored,
+              ballsFaced: f.ballsFaced,
+              fowType: f.fowType,
+              batsman: {
+                id: f.athlete?.id || null,
+                name: f.athlete?.displayName || f.athlete?.name || 'Player',
+                position: f.athlete?.position?.abbreviation || '',
+                headshot:
+                  f.athlete?.headshot?.href ||
+                  (f.athlete?.id ? `https://a.espncdn.com/i/headshots/cricket/players/full/${f.athlete.id}.png` : null)
+              }
+            }))
+          });
+        }
+      }
+    }
+
+    const response = {
+      leagueId: ids.leagueId,
+      eventId: ids.eventId,
+      matchTitle: raw.header?.description || raw.header?.name || 'Cricket Match',
+      inningsCount: inningsFow.length,
+      innings: inningsFow
+    };
+
+    cacheService.set(cacheKey, response, 45 * 1000);
+    return res.status(200).json(response);
+  },
+
+  getDrsReviews: async (req, res) => {
+    const ids = await resolveMatchIds(req);
+    if (!ids || !ids.leagueId || !ids.eventId) {
+      return res.status(400).json({
+        error: 'No match identified',
+        message: 'Provide ?leagueId=...&eventId=... or ?url=...'
+      });
+    }
+
+    const cacheKey = `drs_${ids.leagueId}_${ids.eventId}`;
+    if (!cacheService.isBypassed(req)) {
+      const cached = cacheService.get(cacheKey);
+      if (cached) return res.status(200).json(cached);
+    }
+
+    const raw = await fetchEspnSummaryRaw(ids.leagueId, ids.eventId);
+    if (!raw) {
+      return res.status(500).json({ error: 'Failed to retrieve match summary from ESPN' });
+    }
+
+    const competitors = raw.header?.competitions?.[0]?.competitors || [];
+    const reviewsSummary = [];
+
+    for (const c of competitors) {
+      const teamName = c.team?.displayName || c.team?.name || 'Team';
+      for (const ls of c.linescores || []) {
+        if (ls.reviews) {
+          reviewsSummary.push({
+            team: teamName,
+            period: ls.period || 1,
+            reviews: ls.reviews
+          });
+        }
+      }
+    }
+
+    const challenges = (raw.notes || [])
+      .filter((n) => n.text && n.text.toLowerCase().includes('review by'))
+      .map((n) => ({
+        day: n.dayNumber || null,
+        text: n.text,
+        type: n.type || 'matchnote'
+      }));
+
+    const response = {
+      leagueId: ids.leagueId,
+      eventId: ids.eventId,
+      matchTitle: raw.header?.description || raw.header?.name || 'Cricket Match',
+      reviewsSummary,
+      challenges
+    };
+
+    cacheService.set(cacheKey, response, 45 * 1000);
+    return res.status(200).json(response);
+  },
+
+  getSquads: async (req, res) => {
+    const ids = await resolveMatchIds(req);
+    if (!ids || !ids.leagueId || !ids.eventId) {
+      return res.status(400).json({
+        error: 'No match identified',
+        message: 'Provide ?leagueId=...&eventId=... or ?url=...'
+      });
+    }
+
+    const cacheKey = `squads_${ids.leagueId}_${ids.eventId}`;
+    if (!cacheService.isBypassed(req)) {
+      const cached = cacheService.get(cacheKey);
+      if (cached) return res.status(200).json(cached);
+    }
+
+    const raw = await fetchEspnSummaryRaw(ids.leagueId, ids.eventId);
+    if (!raw) {
+      return res.status(500).json({ error: 'Failed to retrieve match summary from ESPN' });
+    }
+
+    const squads = {};
+    for (const r of raw.rosters || []) {
+      const teamName = r.team?.displayName || r.team?.name || 'Team';
+      const teamLogo =
+        r.team?.logos?.[0]?.href ||
+        (r.team?.id ? `https://a.espncdn.com/i/teamlogos/cricket/500/${r.team.id}.png` : null);
+      const starters = [];
+      const bench = [];
+
+      for (const p of r.roster || []) {
+        const playerObj = {
+          id: p.athlete?.id || null,
+          name: p.athlete?.displayName || p.athlete?.name || 'Player',
+          fullName: p.athlete?.fullName || '',
+          position: p.athlete?.position?.name || p.position?.name || 'Player',
+          positionAbbr: p.athlete?.position?.abbreviation || p.position?.abbreviation || '',
+          captain: Boolean(p.captain),
+          keeper: Boolean(p.keeper),
+          starter: Boolean(p.starter),
+          headshot:
+            p.athlete?.headshot?.href ||
+            (p.athlete?.id ? `https://a.espncdn.com/i/headshots/cricket/players/full/${p.athlete.id}.png` : null)
+        };
+
+        if (p.starter) {
+          starters.push(playerObj);
+        } else {
+          bench.push(playerObj);
+        }
+      }
+
+      squads[teamName] = {
+        team: {
+          id: r.team?.id || null,
+          name: teamName,
+          logo: teamLogo
+        },
+        playingXI: starters,
+        bench
+      };
+    }
+
+    const debuts = (raw.debuts || []).map((d) => ({
+      team: d.team?.displayName || d.team?.name,
+      players: (d.roster || []).map((p) => p.athlete?.displayName || p.athlete?.name)
+    }));
+
+    const response = {
+      leagueId: ids.leagueId,
+      eventId: ids.eventId,
+      matchTitle: raw.header?.description || raw.header?.name || 'Cricket Match',
+      squads,
+      debuts
+    };
+
+    cacheService.set(cacheKey, response, 15 * 60 * 1000);
+    return res.status(200).json(response);
+  },
+
+  getMatchInfo: async (req, res) => {
+    const ids = await resolveMatchIds(req);
+    if (!ids || !ids.leagueId || !ids.eventId) {
+      return res.status(400).json({
+        error: 'No match identified',
+        message: 'Provide ?leagueId=...&eventId=... or ?url=...'
+      });
+    }
+
+    const cacheKey = `match_info_${ids.leagueId}_${ids.eventId}`;
+    if (!cacheService.isBypassed(req)) {
+      const cached = cacheService.get(cacheKey);
+      if (cached) return res.status(200).json(cached);
+    }
+
+    const raw = await fetchEspnSummaryRaw(ids.leagueId, ids.eventId);
+    if (!raw) {
+      return res.status(500).json({ error: 'Failed to retrieve match summary from ESPN' });
+    }
+
+    const gameInfo = raw.gameInfo || {};
+    const venue = gameInfo.venue || {};
+    const officials = (gameInfo.officials || []).map((o) => ({
+      name: o.displayName,
+      role: o.position?.name || 'Official',
+      order: o.order,
+      country: o.flag?.alt || ''
+    }));
+
+    const tossNote = (raw.notes || []).find((n) => n.type === 'toss')?.text || '';
+    const matchDaysNote = (raw.notes || []).find((n) => n.type === 'matchdays')?.text || '';
+    const hoursOfPlayNote = (raw.notes || []).find((n) => n.type === 'hoursofplay')?.text || '';
+    const matchNumberNote = (raw.notes || []).find((n) => n.type === 'matchnumber')?.text || '';
+
+    const response = {
+      leagueId: ids.leagueId,
+      eventId: ids.eventId,
+      matchTitle: raw.header?.description || raw.header?.name || 'Cricket Match',
+      toss: tossNote,
+      matchNumber: matchNumberNote,
+      matchDays: matchDaysNote,
+      hoursOfPlay: hoursOfPlayNote,
+      venue: {
+        id: venue.id,
+        name: venue.fullName || venue.shortName || '',
+        city: venue.address?.city || '',
+        country: venue.address?.country || '',
+        capacity: venue.capacity || null,
+        grass: venue.grass !== undefined ? venue.grass : true,
+        images: (venue.images || []).map((img) => img.href)
+      },
+      officials
+    };
+
+    cacheService.set(cacheKey, response, 15 * 60 * 1000);
+    return res.status(200).json(response);
+  },
+
+  getMatchPreview: async (req, res) => {
+    const ids = await resolveMatchIds(req);
+    if (!ids || !ids.leagueId || !ids.eventId) {
+      return res.status(400).json({
+        error: 'No match identified',
+        message: 'Provide ?leagueId=...&eventId=... or ?url=...'
+      });
+    }
+
+    const cacheKey = `match_preview_${ids.leagueId}_${ids.eventId}`;
+    if (!cacheService.isBypassed(req)) {
+      const cached = cacheService.get(cacheKey);
+      if (cached) return res.status(200).json(cached);
+    }
+
+    // Commentary over 0.1 contains pitch report, captain quotes, and match setup in preText
+    const commentary = await fetchEspnCommentary(ids.leagueId, ids.eventId, 5, 1, 1);
+    const firstItem = commentary?.[0] || {};
+    const preText = firstItem.preText || '';
+
+    const response = {
+      leagueId: ids.leagueId,
+      eventId: ids.eventId,
+      previewHtml: preText,
+      timestamp: firstItem.timestamp || null
+    };
+
+    cacheService.set(cacheKey, response, 30 * 60 * 1000);
+    return res.status(200).json(response);
+  },
+
+  getManhattan: async (req, res) => {
+    const ids = await resolveMatchIds(req);
+    if (!ids || !ids.leagueId || !ids.eventId) {
+      return res.status(400).json({
+        error: 'No match identified',
+        message: 'Provide ?leagueId=...&eventId=... or ?url=...'
+      });
+    }
+
+    const cacheKey = `manhattan_${ids.leagueId}_${ids.eventId}`;
+    if (!cacheService.isBypassed(req)) {
+      const cached = cacheService.get(cacheKey);
+      if (cached) return res.status(200).json(cached);
+    }
+
+    // Fetch full match balls
+    const commentary = await fetchEspnCommentary(ids.leagueId, ids.eventId, 300, 1);
+    const inningsMap = {};
+
+    for (const item of commentary) {
+      const period = item.period || 'Innings 1';
+      const overNum = item.over ? Math.floor(item.over) + 1 : 1;
+      if (!inningsMap[period]) {
+        inningsMap[period] = {
+          period,
+          team: item.team || '',
+          oversMap: {}
+        };
+      }
+
+      if (!inningsMap[period].oversMap[overNum]) {
+        inningsMap[period].oversMap[overNum] = {
+          over: overNum,
+          runs: 0,
+          wickets: 0,
+          balls: 0,
+          bowler: item.bowler || ''
+        };
+      }
+
+      inningsMap[period].oversMap[overNum].runs += item.runs || 0;
+      if (item.isWicket) {
+        inningsMap[period].oversMap[overNum].wickets += 1;
+      }
+      inningsMap[period].oversMap[overNum].balls += 1;
+      if (item.bowler) {
+        inningsMap[period].oversMap[overNum].bowler = item.bowler;
+      }
+    }
+
+    const innings = Object.values(inningsMap).map((inn) => {
+      let cumulative = 0;
+      const sortedOvers = Object.values(inn.oversMap)
+        .sort((a, b) => a.over - b.over)
+        .map((o) => {
+          cumulative += o.runs;
+          return {
+            over: o.over,
+            runs: o.runs,
+            wickets: o.wickets,
+            balls: o.balls,
+            bowler: o.bowler,
+            cumulativeRuns: cumulative
+          };
+        });
+
+      return {
+        period: inn.period,
+        team: inn.team,
+        totalOvers: sortedOvers.length,
+        overs: sortedOvers
+      };
+    });
+
+    const response = {
+      leagueId: ids.leagueId,
+      eventId: ids.eventId,
+      innings
+    };
+
+    cacheService.set(cacheKey, response, 45 * 1000);
+    return res.status(200).json(response);
+  },
+
+  getWorm: async (req, res) => {
+    const ids = await resolveMatchIds(req);
+    if (!ids || !ids.leagueId || !ids.eventId) {
+      return res.status(400).json({
+        error: 'No match identified',
+        message: 'Provide ?leagueId=...&eventId=... or ?url=...'
+      });
+    }
+
+    const cacheKey = `worm_${ids.leagueId}_${ids.eventId}`;
+    if (!cacheService.isBypassed(req)) {
+      const cached = cacheService.get(cacheKey);
+      if (cached) return res.status(200).json(cached);
+    }
+
+    const commentary = await fetchEspnCommentary(ids.leagueId, ids.eventId, 300, 1);
+    const inningsMap = {};
+
+    for (const item of commentary) {
+      const period = item.period || 'Innings 1';
+      const overNum = item.over ? Math.floor(item.over) + 1 : 1;
+      if (!inningsMap[period]) {
+        inningsMap[period] = {
+          period,
+          team: item.team || '',
+          oversMap: {}
+        };
+      }
+
+      if (!inningsMap[period].oversMap[overNum]) {
+        inningsMap[period].oversMap[overNum] = {
+          over: overNum,
+          runs: 0,
+          wickets: 0
+        };
+      }
+
+      inningsMap[period].oversMap[overNum].runs += item.runs || 0;
+      if (item.isWicket) {
+        inningsMap[period].oversMap[overNum].wickets += 1;
+      }
+    }
+
+    const trajectories = Object.values(inningsMap).map((inn) => {
+      let cumulative = 0;
+      const points = [{ over: 0, score: 0, wickets: 0 }];
+      const sorted = Object.values(inn.oversMap).sort((a, b) => a.over - b.over);
+      let totalWickets = 0;
+
+      for (const o of sorted) {
+        cumulative += o.runs;
+        totalWickets += o.wickets;
+        points.push({
+          over: o.over,
+          score: cumulative,
+          wickets: totalWickets
+        });
+      }
+
+      return {
+        period: inn.period,
+        team: inn.team,
+        trajectory: points
+      };
+    });
+
+    const response = {
+      leagueId: ids.leagueId,
+      eventId: ids.eventId,
+      trajectories
+    };
+
+    cacheService.set(cacheKey, response, 45 * 1000);
+    return res.status(200).json(response);
   }
 };
 
-// Alias for lowercase c routing
+// Aliases for routing flexibility
 scoreCardController.getScorecard = scoreCardController.getScoreCard;
+scoreCardController.getFow = scoreCardController.getFallOfWickets;
+scoreCardController.getDrs = scoreCardController.getDrsReviews;
 
 module.exports = scoreCardController;
