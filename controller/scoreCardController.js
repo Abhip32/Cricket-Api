@@ -483,6 +483,8 @@ function formatEspnScorecard(data) {
       notes: data.notes || [],
       debuts: data.debuts || [],
       videos: data.videos || [],
+      news: data.news?.articles || data.articles || (data.news ? (Array.isArray(data.news) ? data.news : [data.news]) : []),
+      article: data.article || null,
       raw: data // Complete 100% unstripped underlying ESPN payload
     }
   };
@@ -943,6 +945,7 @@ const scoreCardController = {
 
       scorecardData.squads = squads;
       scorecardData.details = details;
+      scorecardData.news = nextDataJson?.props?.appPageProps?.data?.article || nextDataJson?.props?.appPageProps?.data?.news || [];
       scorecardData.raw = nextDataJson || null;
 
       if (scorecardData.tables.length === 0 && (!scorecardData.summary || scorecardData.summary.teams.length === 0)) {
