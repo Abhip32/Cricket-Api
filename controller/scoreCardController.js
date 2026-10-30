@@ -132,6 +132,125 @@ async function fetchEspnCommentary(leagueId, eventId, limit = 100, page = 1, per
   }
 }
 
+function getOrdinalSuffix(i) {
+  const j = i % 10, k = i % 100;
+  if (j === 1 && k !== 11) return 'st';
+  if (j === 2 && k !== 12) return 'nd';
+  if (j === 3 && k !== 13) return 'rd';
+  return 'th';
+}
+
+/**
+ * Hydrates wicket-by-wicket partnerships with actual batsman names, runs, and balls
+ * by tracking crease batters against the batting order and dismissal timeline
+ */
+function hydrateInningsPartnerships(competitor, linescore, rosters) {
+  const teamRoster = (rosters || []).find((r) => r.team?.id === competitor.team?.id)?.roster || [];
+  const period = linescore.period || 1;
+  const fowList = linescore.fow || [];
+  const partList = linescore.partnerships || [];
+  if (!partList || partList.length === 0) return [];
+
+  const batters = [];
+  for (const p of teamRoster) {
+    const pLinescore = (p.linescores || []).find((l) => {
+      const innNum = l.statistics?.categories?.find((cat) => cat.name === 'general')?.stats?.find((s) => s.name === 'inningsNumber')?.value;
+      return innNum === period || l.period === period;
+    });
+    if (pLinescore) {
+      const genStats = pLinescore.statistics?.categories?.find((cat) => cat.name === 'general')?.stats || [];
+      const pos = genStats.find((s) => s.name === 'battingPosition')?.value || 99;
+      const runs = genStats.find((s) => s.name === 'runs')?.value || 0;
+      const balls = genStats.find((s) => s.name === 'ballsFaced')?.value || 0;
+      batters.push({
+        id: p.athlete?.id || null,
+        name: p.athlete?.displayName || p.athlete?.name || '',
+        pos: Number(pos),
+        totalRuns: Number(runs),
+        totalBalls: Number(balls),
+        headshot:
+          p.athlete?.headshot?.href ||
+          (p.athlete?.id ? `https://a.espncdn.com/i/headshots/cricket/players/full/${p.athlete.id}.png` : null)
+      });
+    }
+  }
+  batters.sort((a, b) => a.pos - b.pos);
+
+  let b1 = batters[0] || null;
+  let b2 = batters[1] || null;
+  let nextBatterIdx = 2;
+
+  return partList.map((p, i) => {
+    const wktNum = p.wicketNumber || (i + 1);
+    const fow = fowList.find((f) => f.wicketNumber === wktNum);
+    const partRuns = Number(p.runs) || 0;
+
+    const outBatsmanName = fow?.athlete?.displayName || fow?.athlete?.name || '';
+    const outBatsmanRuns = Number(fow?.runsScored) || 0;
+    const outBatsmanBalls = Number(fow?.ballsFaced) || 0;
+    const outBatsmanHeadshot =
+      fow?.athlete?.headshot?.href ||
+      (fow?.athlete?.id ? `https://a.espncdn.com/i/headshots/cricket/players/full/${fow.athlete.id}.png` : null);
+
+    let dismissed = null;
+    let partner = null;
+
+    if (outBatsmanName && b1 && b2) {
+      if (b1.name.toLowerCase() === outBatsmanName.toLowerCase() || (b1.id && b1.id === fow.athlete?.id)) {
+        dismissed = b1;
+        partner = b2;
+      } else if (b2.name.toLowerCase() === outBatsmanName.toLowerCase() || (b2.id && b2.id === fow.athlete?.id)) {
+        dismissed = b2;
+        partner = b1;
+      }
+    }
+
+    if (!dismissed) {
+      dismissed = b1 || { id: fow?.athlete?.id || null, name: outBatsmanName, headshot: outBatsmanHeadshot };
+      partner = b2 || { id: null, name: '', headshot: null };
+    }
+
+    const partnerStandRuns = Math.max(0, partRuns - outBatsmanRuns);
+    const approxBalls = p.overs ? Math.round(Number(p.overs) * 6) : 0;
+    const partnerStandBalls = Math.max(0, approxBalls - outBatsmanBalls);
+
+    const result = {
+      wicketNumber: p.wicketNumber || (i + 1),
+      wicketName: p.wicketName || `${i + 1}${getOrdinalSuffix(i + 1)}`,
+      runs: partRuns,
+      overs: p.overs,
+      runRate: p.runRate,
+      start: p.start,
+      end: p.end,
+      batsmen: [
+        {
+          id: dismissed.id || null,
+          name: dismissed.name || outBatsmanName || '',
+          runs: outBatsmanRuns,
+          balls: outBatsmanBalls,
+          headshot: dismissed.headshot || outBatsmanHeadshot || null
+        },
+        {
+          id: partner.id || null,
+          name: partner.name || '',
+          runs: partnerStandRuns,
+          balls: partnerStandBalls,
+          headshot: partner.headshot || null
+        }
+      ]
+    };
+
+    if (nextBatterIdx < batters.length) {
+      const incoming = batters[nextBatterIdx];
+      nextBatterIdx++;
+      b1 = partner;
+      b2 = incoming;
+    }
+
+    return result;
+  });
+}
+
 function formatEspnScorecard(data) {
   if (!data || !data.header) return null;
 

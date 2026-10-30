@@ -42,7 +42,7 @@ This backend powers **[CricGeek](https://github.com/Abhip32/CricGeek)** — a lu
    - Comprehensive points tables with ranks, points, wins, losses, ties, NRR, and official team logos across IPL, BBL, Sheffield Shield, World Cups, and more.
 
 3. **In-Depth Match Analytics & Visual Charts**:
-   - **Partnerships (`/match/partnerships`)**: Wicket-by-wicket partnership analysis with runs, overs, run rates, and individual player contributions with headshots.
+   - **Algorithmic Partnership Crease Hydration (`/match/partnerships`, `/getScorecard`)**: Cross-references playing XI batting orders and Fall of Wickets dismissal records to resolve authentic batsman names, individual runs scored, and balls faced for every wicket stand, eliminating raw empty placeholders.
    - **Fall of Wickets (`/match/fow`)**: Exact over-by-over dismissal timeline with batter scores and dismissal types.
    - **DRS Review Tracker (`/match/drs`)**: Review quotas (permitted, remaining, successful, unsuccessful) and live challenge logs.
    - **Manhattan Chart (`/match/manhattan`)**: Over-by-over runs and wickets data ready for frontend bar charts.
