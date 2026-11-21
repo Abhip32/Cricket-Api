@@ -974,8 +974,8 @@ const scoreCardController = {
               } else {
                 total = { details: '', score: text.replace('Total', '').trim() };
               }
-            } else if (text.startsWith('Did not bat') && didNotBat.length === 0) {
-              didNotBat = text.replace('Did not bat', '').split(',').map(n => n.trim()).filter(Boolean);
+            } else if (/^(did not bat|yet to bat)/i.test(text) && didNotBat.length === 0) {
+              didNotBat = text.replace(/^(did not bat|yet to bat):?/i, '').split(',').map(n => n.trim()).filter(Boolean);
             } else if (text.startsWith('Fall of wickets') && fallOfWickets.length === 0) {
               const raw = text.replace('Fall of wickets', '').trim();
               fallOfWickets = raw.split(/(?<=\))\s*,\s*|\s*,\s*(?=\d+-)/).map(f => f.trim()).filter(Boolean);
@@ -1004,8 +1004,18 @@ const scoreCardController = {
 
           // Check if row has valid player data
           const firstCell = Object.values(rowData)[0] || '';
-          if (firstCell && !firstCell.toLowerCase().includes('extras') && !firstCell.toLowerCase().includes('total') && !firstCell.toLowerCase().includes('did not bat') && !firstCell.toLowerCase().includes('fall of wickets')) {
+          const firstCellLower = firstCell.toLowerCase();
+          if (
+            firstCell &&
+            !firstCellLower.includes('extras') &&
+            !firstCellLower.includes('total') &&
+            !firstCellLower.includes('did not bat') &&
+            !firstCellLower.includes('yet to bat') &&
+            !firstCellLower.includes('fall of wickets')
+          ) {
             rows.push(rowData);
+          } else if (/^(did not bat|yet to bat)/i.test(firstCell) && didNotBat.length === 0) {
+            didNotBat = firstCell.replace(/^(did not bat|yet to bat):?/i, '').split(',').map(n => n.trim()).filter(Boolean);
           }
         });
 

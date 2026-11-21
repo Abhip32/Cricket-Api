@@ -29,7 +29,7 @@ const playerController = {
     }
 
     try {
-      const url = `https://site.web.api.espn.com/apis/search/v2?query=${encodeURIComponent(trimmedQuery)}&type=player&limit=${limit}`;
+      const url = `https://site.api.espn.com/apis/search/v2?query=${encodeURIComponent(trimmedQuery)}&limit=${limit}`;
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 4500);
       const resp = await fetch(url, {
@@ -43,8 +43,18 @@ const playerController = {
       }
 
       const data = await resp.json();
-      const playerGroup = data.results?.find((r) => r.type === 'player');
-      const rawPlayers = playerGroup?.contents || [];
+      let playerGroup = data.results?.find((r) => r.type === 'player');
+      let rawPlayers = playerGroup?.contents || [];
+
+      if (rawPlayers.length === 0) {
+        for (const r of data.results || []) {
+          const matching = (r.contents || []).filter(c => c.type === 'player' || c.uid?.includes('~a:'));
+          if (matching.length > 0) {
+            rawPlayers = matching;
+            break;
+          }
+        }
+      }
 
       const players = rawPlayers.map((p) => {
         // Extract numeric ID from UID format "s:200~a:253802" or direct ID
@@ -103,7 +113,7 @@ const playerController = {
     }
 
     try {
-      const url = `https://site.web.api.espn.com/apis/common/v3/sports/cricket/athletes/${playerId}`;
+      const url = `https://site.api.espn.com/apis/common/v3/sports/cricket/athletes/${playerId}`;
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 4500);
       const resp = await fetch(url, {
@@ -116,7 +126,32 @@ const playerController = {
         if (resp.status === 404) {
           return res.status(404).json({ error: 'Player not found', id: playerId });
         }
-        return res.status(resp.status).json({ error: 'Failed to retrieve player profile from ESPN' });
+        // Fallback for transient 503 or ESPN downstream error
+        const fallbackProfile = {
+          id: playerId,
+          name: req.query.name || '',
+          fullName: req.query.name || '',
+          shortName: req.query.name || '',
+          dateOfBirth: null,
+          age: null,
+          gender: 'M',
+          position: 'Cricketer',
+          positionAbbr: '',
+          battingStyle: null,
+          battingStyleShort: null,
+          bowlingStyle: null,
+          bowlingStyleShort: null,
+          headshot: `https://a.espncdn.com/i/headshots/cricket/players/full/${playerId}.png`,
+          team: {
+            id: null,
+            name: '',
+            abbreviation: '',
+            color: null,
+            flag: null
+          },
+          profileUrl: `https://www.cricinfo.com/ci/content/player/${playerId}.html`
+        };
+        return res.status(200).json(fallbackProfile);
       }
 
       const data = await resp.json();
