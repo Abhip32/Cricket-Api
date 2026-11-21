@@ -17,6 +17,15 @@ function decodeHtmlEntities(str) {
     .trim();
 }
 
+function stripHtmlTags(str) {
+  if (!str || typeof str !== 'string') return '';
+  return str.replace(/<[^>]*>/g, '').trim();
+}
+
+function cleanText(str) {
+  return stripHtmlTags(decodeHtmlEntities(str));
+}
+
 function extractIdsFromUrl(inputUrl) {
   if (!inputUrl) return null;
   const m1 = inputUrl.match(/series\/(\d+)\/game\/(\d+)/);
@@ -90,48 +99,92 @@ async function fetchEspnSummaryRaw(leagueId, eventId) {
   return null;
 }
 
-async function fetchEspnCommentary(leagueId, eventId, limit = 100, page = 1, period = null) {
-  try {
-    let url = `https://site.web.api.espn.com/apis/site/v2/sports/cricket/${leagueId}/playbyplay?event=${eventId}&limit=${limit}&page=${page}`;
-    if (period) {
-      url += `&period=${period}`;
-    }
+async function fetchEspnCommentary(leagueId, eventId, limit = 100, page = null, period = null, order = 'desc') {
+  const hosts = [
+    `https://site.api.espn.com/apis/site/v2/sports/cricket/${leagueId}/playbyplay?event=${eventId}`,
+    `https://site.web.api.espn.com/apis/site/v2/sports/cricket/${leagueId}/playbyplay?event=${eventId}`
+  ];
+
+  async function fetchUrl(baseUrl, params = '') {
+    const fullUrl = baseUrl + params;
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 4500);
-    const res = await fetch(url, {
-      signal: controller.signal,
-      headers: { 'User-Agent': 'Mozilla/5.0' }
-    });
-    clearTimeout(timer);
-    if (!res.ok) return [];
-    const json = await res.json();
-    const items = json.commentary?.items || [];
+    const timer = setTimeout(() => controller.abort(), 6500);
+    try {
+      const res = await fetch(fullUrl, {
+        signal: controller.signal,
+        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
+      });
+      clearTimeout(timer);
+      if (!res.ok) return null;
+      return await res.json();
+    } catch (e) {
+      return null;
+    }
+  }
+
+  try {
+    let base = hosts[0];
+    let extraParams = `&limit=${limit}`;
+    if (period) extraParams += `&period=${period}`;
+
+    let json = await fetchUrl(base, extraParams + (page ? `&page=${page}` : ''));
+    if (!json && hosts[1]) {
+      base = hosts[1];
+      json = await fetchUrl(base, extraParams + (page ? `&page=${page}` : ''));
+    }
+
+    if (!json || !json.commentary) return [];
+
+    const totalCount = json.commentary?.count || 0;
+    const pageCount = json.commentary?.pageCount || 1;
+    let items = json.commentary?.items || [];
+
+    // If no explicit page was requested and there are multiple pages,
+    // fetch the latest balls (the final page and if needed page - 1)
+    if (!page && pageCount > 1 && totalCount > limit) {
+      const lastPageJson = await fetchUrl(base, `${extraParams}&page=${pageCount}`);
+      if (lastPageJson?.commentary?.items) {
+        items = lastPageJson.commentary.items;
+        // If the last page has fewer items than limit, fetch previous page to fill window
+        if (items.length < limit && pageCount > 1) {
+          const prevPageJson = await fetchUrl(base, `${extraParams}&page=${pageCount - 1}`);
+          const prevItems = prevPageJson?.commentary?.items || [];
+          items = [...prevItems, ...items].slice(-limit);
+        }
+      }
+    }
+
+    // Default order is 'desc' (latest balls first)
+    if (order === 'desc') {
+      items = items.slice().reverse();
+    }
+
     return items.map((item) => {
       const isWicket = Boolean(
         item.dismissal?.dismissal ||
         item.playType?.description?.toLowerCase().includes('out') ||
         item.shortText?.toLowerCase().includes('out')
       );
-      const bowler = decodeHtmlEntities(item.bowler?.athlete?.displayName || '');
-      const batsman = decodeHtmlEntities(item.batsman?.athlete?.displayName || '');
+      const bowler = cleanText(item.bowler?.athlete?.displayName || '');
+      const batsman = cleanText(item.batsman?.athlete?.displayName || '');
       const mediaId = item.mediaId && item.mediaId !== 0 ? item.mediaId : null;
       return {
         id: item.id,
         over: item.over?.overs || item.over?.actual || 0,
         ball: item.over?.ball || 0,
-        shortText: decodeHtmlEntities(item.shortText || ''),
-        text: decodeHtmlEntities(item.text || item.shortText || ''),
+        shortText: cleanText(item.shortText || ''),
+        text: cleanText(item.text || item.shortText || ''),
         runs: item.scoreValue ?? 0,
         isWicket,
         wicket: isWicket,
-        dismissal: decodeHtmlEntities(item.dismissal?.text || ''),
+        dismissal: cleanText(item.dismissal?.text || ''),
         bowler,
         batsman,
         batter: batsman,
         team: item.team?.displayName || item.team?.name || '',
         period: item.periodText || `Innings ${item.period || 1}`,
-        preText: decodeHtmlEntities(item.preText || ''),
-        postText: decodeHtmlEntities(item.postText || ''),
+        preText: cleanText(item.preText || ''),
+        postText: cleanText(item.postText || ''),
         mediaId,
         videoClipUrl: mediaId ? `https://www.espn.com/video/clip/_/id/${mediaId}` : null,
         timestamp: item.date || null
@@ -1117,16 +1170,17 @@ const scoreCardController = {
     }
 
     const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 100, 1), 300);
-    const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+    const page = req.query.page ? parseInt(req.query.page, 10) : null;
     const period = req.query.period ? parseInt(req.query.period, 10) : null;
+    const order = req.query.order === 'asc' ? 'asc' : 'desc';
 
-    const cacheKey = `commentary_${ids.leagueId}_${ids.eventId}_${limit}_${page}_${period || 'all'}`;
+    const cacheKey = `commentary_${ids.leagueId}_${ids.eventId}_${limit}_${page || 'latest'}_${period || 'all'}_${order}`;
     if (!cacheService.isBypassed(req)) {
       const cached = cacheService.get(cacheKey);
       if (cached) return res.status(200).json(cached);
     }
 
-    const commentary = await fetchEspnCommentary(ids.leagueId, ids.eventId, limit, page, period);
+    const commentary = await fetchEspnCommentary(ids.leagueId, ids.eventId, limit, page, period, order);
     cacheService.set(cacheKey, commentary, 30 * 1000); // 30s TTL
     return res.status(200).json(commentary);
   },
@@ -2086,7 +2140,7 @@ const scoreCardController = {
     }
 
     try {
-      const commentary = await fetchEspnCommentary(ids.leagueId, ids.eventId, 200, 1);
+      const commentary = await fetchEspnCommentary(ids.leagueId, ids.eventId, 300, null, null, 'asc');
       const oversMap = {};
 
       for (const item of commentary) {
@@ -2107,11 +2161,11 @@ const scoreCardController = {
         }
 
         const ballOutcome = item.isWicket ? 'W' : (item.runs === 0 ? '•' : String(item.runs));
-        oversMap[key].balls.unshift(ballOutcome);
+        oversMap[key].balls.push(ballOutcome);
         oversMap[key].runs += item.runs || 0;
         if (item.isWicket) oversMap[key].wickets += 1;
         if (item.bowler && !oversMap[key].bowler) oversMap[key].bowler = item.bowler;
-        oversMap[key].commentaryItems.unshift(item);
+        oversMap[key].commentaryItems.push(item);
       }
 
       // Sort overs descending (newest over first)
