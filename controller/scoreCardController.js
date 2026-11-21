@@ -1635,6 +1635,259 @@ const scoreCardController = {
 
     cacheService.set(cacheKey, response, 45 * 1000);
     return res.status(200).json(response);
+  },
+
+  /**
+   * Get Live Match Situation, CRR, RRR, Target Math, and Win Probability
+   * Endpoint: GET /match/situation or GET /getSituation
+   */
+  getSituation: async (req, res) => {
+    const ids = await resolveMatchIds(req);
+    if (!ids || !ids.leagueId || !ids.eventId) {
+      return res.status(400).json({
+        error: 'No match identified',
+        message: 'Provide ?leagueId=...&eventId=... or ?url=...'
+      });
+    }
+
+    const cacheKey = `situation_${ids.leagueId}_${ids.eventId}`;
+    if (!cacheService.isBypassed(req)) {
+      const cached = cacheService.get(cacheKey);
+      if (cached) return res.status(200).json(cached);
+    }
+
+    try {
+      const summary = await fetchEspnSummaryRaw(ids.leagueId, ids.eventId);
+      const commentary = await fetchEspnCommentary(ids.leagueId, ids.eventId, 40, 1);
+
+      const competition = summary?.header?.competitions?.[0];
+      const competitors = competition?.competitors || [];
+
+      // Extract batting & bowling teams
+      let battingTeam = null;
+      let bowlingTeam = null;
+      let target = null;
+      let statusText = competition?.status?.type?.detail || competition?.statusText || '';
+      const isLive = competition?.status?.type?.state === 'in' || !competition?.status?.type?.completed;
+
+      competitors.forEach((c) => {
+        const teamName = c.team?.displayName || c.team?.name || '';
+        const flag = c.team?.logos?.[0]?.href || flagService.getFlag(teamName);
+        const linescore = c.linescores?.[c.linescores.length - 1];
+
+        const tData = {
+          id: c.team?.id,
+          name: teamName,
+          abbreviation: c.team?.abbreviation || teamName.slice(0, 3).toUpperCase(),
+          score: c.score || '',
+          flag,
+          overs: linescore?.overs || 0,
+          runs: linescore?.runs || 0,
+          wickets: linescore?.wickets || 0,
+          isBatting: Boolean(linescore?.isBatting || c.isBatting),
+          target: linescore?.target || 0
+        };
+
+        if (linescore?.target) target = linescore.target;
+
+        if (tData.isBatting) {
+          battingTeam = tData;
+        } else {
+          bowlingTeam = tData;
+        }
+      });
+
+      if (!battingTeam && competitors[0]) {
+        battingTeam = {
+          name: competitors[0].team?.displayName || '',
+          score: competitors[0].score || '',
+          flag: flagService.getFlag(competitors[0].team?.displayName || ''),
+          overs: 0,
+          runs: 0,
+          wickets: 0
+        };
+      }
+      if (!bowlingTeam && competitors[1]) {
+        bowlingTeam = {
+          name: competitors[1].team?.displayName || '',
+          score: competitors[1].score || '',
+          flag: flagService.getFlag(competitors[1].team?.displayName || ''),
+          overs: 0,
+          runs: 0,
+          wickets: 0
+        };
+      }
+
+      // CRR calculation
+      let currentRunRate = 0;
+      if (battingTeam?.overs && battingTeam.overs > 0) {
+        const fullOvers = Math.floor(battingTeam.overs);
+        const balls = Math.round((battingTeam.overs - fullOvers) * 10);
+        const totalBalls = fullOvers * 6 + balls;
+        if (totalBalls > 0 && battingTeam.runs) {
+          currentRunRate = parseFloat(((battingTeam.runs / totalBalls) * 6).toFixed(2));
+        }
+      }
+
+      // RRR calculation
+      let requiredRunRate = null;
+      let runsNeeded = null;
+      let ballsRemaining = null;
+
+      if (target && battingTeam?.runs != null) {
+        runsNeeded = Math.max(0, target - battingTeam.runs);
+        const formatName = (summary?.header?.league?.name || '').toUpperCase();
+        let totalFormatBalls = 120;
+        if (formatName.includes('ODI') || formatName.includes('ONE-DAY')) totalFormatBalls = 300;
+        else if (formatName.includes('TEST') || formatName.includes('SHIELD')) totalFormatBalls = 0;
+
+        if (totalFormatBalls > 0 && battingTeam.overs) {
+          const fullOvers = Math.floor(battingTeam.overs);
+          const balls = Math.round((battingTeam.overs - fullOvers) * 10);
+          const bowledBalls = fullOvers * 6 + balls;
+          ballsRemaining = Math.max(0, totalFormatBalls - bowledBalls);
+          if (ballsRemaining > 0) {
+            requiredRunRate = parseFloat(((runsNeeded / ballsRemaining) * 6).toFixed(2));
+          }
+        }
+      }
+
+      // Win probability estimate
+      let teamAWinProb = 50;
+      let teamBWinProb = 50;
+
+      if (summary?.predictor?.homeTeam?.gameProjection) {
+        teamAWinProb = parseFloat(summary.predictor.homeTeam.gameProjection);
+        teamBWinProb = parseFloat((100 - teamAWinProb).toFixed(1));
+      } else if (requiredRunRate !== null && currentRunRate > 0) {
+        const wicketsInHand = 10 - (battingTeam?.wickets || 0);
+        let battingChance = 50 + (currentRunRate - requiredRunRate) * 7 + (wicketsInHand - 5) * 4;
+        battingChance = Math.min(98, Math.max(2, Math.round(battingChance)));
+        teamAWinProb = battingChance;
+        teamBWinProb = 100 - battingChance;
+      }
+
+      // Last 5 overs runs from commentary
+      let last5OversRuns = 0;
+      let last5OversWickets = 0;
+      const recentBalls = commentary.slice(0, 30);
+      recentBalls.forEach((b) => {
+        last5OversRuns += b.runs || 0;
+        if (b.isWicket) last5OversWickets += 1;
+      });
+
+      // Active striker & bowler
+      let striker = null;
+      let currentBowler = null;
+
+      if (commentary.length > 0) {
+        const latest = commentary[0];
+        if (latest.batsman) {
+          striker = { name: latest.batsman };
+        }
+        if (latest.bowler) {
+          currentBowler = { name: latest.bowler };
+        }
+      }
+
+      const response = {
+        leagueId: ids.leagueId,
+        eventId: ids.eventId,
+        isLive,
+        statusText,
+        battingTeam,
+        bowlingTeam,
+        target,
+        runsNeeded,
+        ballsRemaining,
+        currentRunRate,
+        requiredRunRate,
+        winProbability: {
+          teamA: battingTeam?.name || 'Batting Team',
+          teamAPercentage: teamAWinProb,
+          teamB: bowlingTeam?.name || 'Bowling Team',
+          teamBPercentage: teamBWinProb
+        },
+        striker,
+        currentBowler,
+        last5Overs: {
+          runs: last5OversRuns,
+          wickets: last5OversWickets
+        }
+      };
+
+      cacheService.set(cacheKey, response, 30 * 1000); // 30 sec TTL
+      return res.status(200).json(response);
+    } catch (err) {
+      console.error('getSituation error:', err.message);
+      return res.status(500).json({ error: 'Failed to retrieve match situation', message: err.message });
+    }
+  },
+
+  /**
+   * Get Over-by-Over ball summaries
+   * Endpoint: GET /match/overs or GET /getOvers
+   */
+  getOvers: async (req, res) => {
+    const ids = await resolveMatchIds(req);
+    if (!ids || !ids.leagueId || !ids.eventId) {
+      return res.status(400).json({
+        error: 'No match identified',
+        message: 'Provide ?leagueId=...&eventId=... or ?url=...'
+      });
+    }
+
+    const cacheKey = `overs_summary_${ids.leagueId}_${ids.eventId}`;
+    if (!cacheService.isBypassed(req)) {
+      const cached = cacheService.get(cacheKey);
+      if (cached) return res.status(200).json(cached);
+    }
+
+    try {
+      const commentary = await fetchEspnCommentary(ids.leagueId, ids.eventId, 200, 1);
+      const oversMap = {};
+
+      for (const item of commentary) {
+        const overNum = item.over ? Math.floor(item.over) + 1 : 1;
+        const period = item.period || 'Innings 1';
+        const key = `${period}_${overNum}`;
+
+        if (!oversMap[key]) {
+          oversMap[key] = {
+            overNumber: overNum,
+            period,
+            bowler: item.bowler || '',
+            runs: 0,
+            wickets: 0,
+            balls: [],
+            commentaryItems: []
+          };
+        }
+
+        const ballOutcome = item.isWicket ? 'W' : (item.runs === 0 ? '•' : String(item.runs));
+        oversMap[key].balls.unshift(ballOutcome);
+        oversMap[key].runs += item.runs || 0;
+        if (item.isWicket) oversMap[key].wickets += 1;
+        if (item.bowler && !oversMap[key].bowler) oversMap[key].bowler = item.bowler;
+        oversMap[key].commentaryItems.unshift(item);
+      }
+
+      // Sort overs descending (newest over first)
+      const oversList = Object.values(oversMap).sort((a, b) => b.overNumber - a.overNumber);
+
+      const response = {
+        leagueId: ids.leagueId,
+        eventId: ids.eventId,
+        oversCount: oversList.length,
+        overs: oversList
+      };
+
+      cacheService.set(cacheKey, response, 30 * 1000);
+      return res.status(200).json(response);
+    } catch (err) {
+      console.error('getOvers error:', err.message);
+      return res.status(500).json({ error: 'Failed to retrieve over summaries', message: err.message });
+    }
   }
 };
 
@@ -1642,5 +1895,7 @@ const scoreCardController = {
 scoreCardController.getScorecard = scoreCardController.getScoreCard;
 scoreCardController.getFow = scoreCardController.getFallOfWickets;
 scoreCardController.getDrs = scoreCardController.getDrsReviews;
+scoreCardController.getSituation = scoreCardController.getSituation;
+scoreCardController.getOvers = scoreCardController.getOvers;
 
 module.exports = scoreCardController;

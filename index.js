@@ -254,11 +254,47 @@ app.get('/', (req, res) => {
         endpoint: '/getNews',
         aliases: ['/news'],
         method: 'GET',
-        description: 'Returns latest cricket news articles with titles, descriptions, dates, authors, high-res 900x506 images, and categories powered directly by ESPN.',
+        description: 'Returns latest cricket news articles with titles, descriptions, dates, authors, high-res 900x506 images, and categories powered directly by ESPN. Supports country feeds.',
         cacheTTL: '10 minutes',
         parameters: {
-          leagueId: 'Optional tournament filter (e.g. ?leagueId=8048 for IPL news, default "0" for global news)',
+          country: 'Optional country filter (e.g. ?country=india, ?country=australia, ?country=england, ?country=pakistan, ?country=south-africa)',
+          feedId: 'Optional numeric feed ID (0=global, 6=india, 2=australia, 1=england, 7=pakistan, 3=south africa)',
+          leagueId: 'Optional tournament filter',
           refresh: 'Optional boolean (?refresh=true) to bypass cache'
+        }
+      },
+      liveTicker: {
+        endpoint: '/getTicker',
+        aliases: ['/match/ticker'],
+        method: 'GET',
+        description: 'Returns real-time scrolling match cards for the top global ticker bar, with team logos, live scores, overs, status, and match links.',
+        cacheTTL: '30 seconds',
+        parameters: {
+          refresh: 'Optional boolean (?refresh=true) to bypass cache'
+        }
+      },
+      matchSituation: {
+        endpoint: '/match/situation',
+        aliases: ['/getSituation'],
+        method: 'GET',
+        description: 'Returns real-time match situation including live Current Run Rate (CRR), Required Run Rate (RRR), target calculations, balls remaining, win probability predictor, active striker, and bowler figures.',
+        cacheTTL: '30 seconds',
+        parameters: {
+          leagueId: 'Tournament ID',
+          eventId: 'Match event ID',
+          url: 'Optional ESPN match URL'
+        }
+      },
+      overSummaries: {
+        endpoint: '/match/overs',
+        aliases: ['/getOvers'],
+        method: 'GET',
+        description: 'Returns grouped over-by-over summary chips with runs scored, wickets fallen, and ball-by-ball sequence (e.g. [1, 4, ., W, 2, 6]) for quick over navigation.',
+        cacheTTL: '30 seconds',
+        parameters: {
+          leagueId: 'Tournament ID',
+          eventId: 'Match event ID',
+          url: 'Optional ESPN match URL'
         }
       },
       photos: {
@@ -394,6 +430,9 @@ app.get('/getMatchInfo', scoreCardController.getMatchInfo);
 app.get('/getMatchPreview', scoreCardController.getMatchPreview);
 app.get('/getManhattan', scoreCardController.getManhattan);
 app.get('/getWorm', scoreCardController.getWorm);
+app.get('/getTicker', matchController.getTicker);
+app.get('/getSituation', scoreCardController.getSituation);
+app.get('/getOvers', scoreCardController.getOvers);
 
 // 404 Handler
 app.use((req, res) => {

@@ -2,16 +2,54 @@ const cheerio = require('cheerio');
 const { fetchPageHtml } = require('../services/browserService');
 const cacheService = require('../services/cacheService');
 
+const COUNTRY_FEED_MAP = {
+  global: 0,
+  all: 0,
+  world: 0,
+  india: 6,
+  ind: 6,
+  in: 6,
+  australia: 2,
+  aus: 2,
+  au: 2,
+  england: 1,
+  eng: 1,
+  uk: 1,
+  pakistan: 7,
+  pak: 7,
+  pk: 7,
+  'south-africa': 3,
+  'south_africa': 3,
+  southafrica: 3,
+  sa: 3,
+  rsa: 3,
+  'west-indies': 4,
+  'west_indies': 4,
+  westindies: 4,
+  wi: 4,
+  'new-zealand': 5,
+  'new_zealand': 5,
+  newzealand: 5,
+  nz: 5,
+  'sri-lanka': 8,
+  'sri_lanka': 8,
+  srilanka: 8,
+  sl: 8,
+  bangladesh: 9,
+  ban: 9,
+  bd: 9
+};
+
 /**
  * Ultra-fast RSS XML parser (< 300ms)
  * Immune to Akamai 403 blocks on Vercel
  * Returns authentic ESPNcricinfo editorial stories with high-res images
  */
-async function fetchRssNews() {
+async function fetchRssNews(feedId = 0) {
   try {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 4000);
-    const res = await fetch('https://www.espncricinfo.com/rss/content/story/feeds/0.xml', {
+    const timer = setTimeout(() => controller.abort(), 8000);
+    const res = await fetch(`https://www.espncricinfo.com/rss/content/story/feeds/${feedId}.xml`, {
       signal: controller.signal,
       headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
     });
@@ -58,7 +96,18 @@ async function fetchRssNews() {
 
 const newsController = {
   getNews: async (req, res) => {
-    const cacheKey = 'cricket_news_rss';
+    // Resolve feed id from country or feed query parameter
+    let feedId = 0;
+    const countryParam = (req.query.country || req.query.region || '').toLowerCase().trim();
+    const feedParam = req.query.feed || req.query.feedId;
+
+    if (feedParam && !isNaN(parseInt(feedParam, 10))) {
+      feedId = parseInt(feedParam, 10);
+    } else if (countryParam && COUNTRY_FEED_MAP[countryParam] !== undefined) {
+      feedId = COUNTRY_FEED_MAP[countryParam];
+    }
+
+    const cacheKey = `cricket_news_rss_feed_${feedId}`;
 
     if (!cacheService.isBypassed(req)) {
       const cached = cacheService.get(cacheKey);
@@ -69,7 +118,7 @@ const newsController = {
 
     try {
       // 1. Primary: Ultra-fast RSS XML parser (< 300ms, authentic ESPNcricinfo articles)
-      const rssNews = await fetchRssNews();
+      const rssNews = await fetchRssNews(feedId);
       if (rssNews && rssNews.length > 0) {
         cacheService.set(cacheKey, rssNews, 10 * 60 * 1000);
         return res.status(200).json(rssNews);

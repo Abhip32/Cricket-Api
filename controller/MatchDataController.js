@@ -799,6 +799,100 @@ const MatchDataController = {
       console.error('getSchedule error:', err.message);
       res.status(500).json({ error: 'Failed to retrieve tournament schedule', message: err.message });
     }
+  },
+
+  /**
+   * Ultra-fast real-time ticker stream across all active & recent matches (< 100ms)
+   * Endpoint: GET /getTicker or GET /match/ticker
+   */
+  getTicker: async (req, res) => {
+    const cacheKey = 'cricket_live_ticker';
+    if (!cacheService.isBypassed(req)) {
+      const cached = cacheService.get(cacheKey);
+      if (cached) return res.status(200).json(cached);
+    }
+
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 8000);
+      const resp = await fetch('https://site.web.api.espn.com/apis/personalized/v2/scoreboard/header?sport=cricket', {
+        signal: controller.signal,
+        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
+      });
+      clearTimeout(timer);
+
+      if (!resp.ok) {
+        return res.status(resp.status).json({ error: 'Failed to retrieve scoreboard header for ticker' });
+      }
+
+      const json = await resp.json();
+      const leagues = json.sports?.[0]?.leagues || [];
+      const tickerItems = [];
+
+      for (const l of leagues) {
+        const leagueName = l.name || 'Cricket Series';
+        for (const ev of l.events || []) {
+          const state = ev.fullStatus?.type?.state || 'pre';
+          const competitors = ev.competitors || [];
+          const teams = competitors.map((c) => {
+            const rawScore = c.score || '';
+            let score = rawScore;
+            let overs = c.overs || '';
+            const oversMatch = rawScore.match(/\(([\d\.\/]+\s*ov[^\)]*)\)/i);
+            if (oversMatch) {
+              overs = oversMatch[1].replace(/,\s*target.*$/i, '').trim();
+              score = rawScore.replace(/\s*\([^\)]*\)/g, '').trim();
+            }
+            const name = c.displayName || c.name || 'Team';
+            const shortName = c.abbreviation || c.shortDisplayName || name.slice(0, 4).toUpperCase();
+            const flag = c.logo || flagService.getFlag(name);
+            if (name && flag) {
+              flagService.registerFlag(name, flag);
+            }
+            return {
+              name,
+              shortName,
+              score,
+              overs,
+              flag
+            };
+          });
+
+          const link = ev.links?.[0]?.href || `https://www.espncricinfo.com/series/${l.id}/${ev.id}`;
+          const isLive = state === 'in' || ev.status === 'live' || ev.fullStatus?.type?.name === 'STATUS_IN_PROGRESS';
+          const isCompleted = state === 'post' || ev.status === 'final';
+
+          tickerItems.push({
+            id: ev.id,
+            leagueId: l.id,
+            league: leagueName,
+            name: ev.name || '',
+            state,
+            isLive,
+            isCompleted,
+            status: ev.fullStatus?.type?.description || (isLive ? 'LIVE' : isCompleted ? 'RESULT' : 'UPCOMING'),
+            statusDetail: ev.statusText || ev.fullStatus?.type?.detail || '',
+            link,
+            teams
+          });
+        }
+      }
+
+      // Order: live matches first, then recent matches, then upcoming
+      tickerItems.sort((a, b) => {
+        if (a.isLive && !b.isLive) return -1;
+        if (!a.isLive && b.isLive) return 1;
+        if (a.isCompleted && !b.isCompleted) return -1;
+        if (!a.isCompleted && b.isCompleted) return 1;
+        return 0;
+      });
+
+      cacheService.set(cacheKey, tickerItems, 30 * 1000); // 30 sec TTL
+      return res.status(200).json(tickerItems);
+    } catch (err) {
+      console.error('getTicker error:', err.message);
+      return res.status(500).json({ error: 'Failed to retrieve ticker items', message: err.message });
+    }
   }
 };
 

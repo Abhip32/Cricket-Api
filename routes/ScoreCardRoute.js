@@ -33,4 +33,10 @@ router.get('/getManhattan', scoreCardController.getManhattan);
 router.get('/match/worm', scoreCardController.getWorm);
 router.get('/getWorm', scoreCardController.getWorm);
 
+router.get('/match/situation', scoreCardController.getSituation);
+router.get('/getSituation', scoreCardController.getSituation);
+
+router.get('/match/overs', scoreCardController.getOvers);
+router.get('/getOvers', scoreCardController.getOvers);
+
 module.exports = router;
