@@ -56,6 +56,28 @@ const playerController = {
         }
       }
 
+      // Secondary fallback to web.api if standard search returned 0 cricket athletes (e.g. Devon Conway)
+      if (rawPlayers.length === 0) {
+        try {
+          const webUrl = `https://site.web.api.espn.com/apis/search/v2?query=${encodeURIComponent(trimmedQuery)}&limit=${limit}`;
+          const webResp = await fetch(webUrl, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+          if (webResp.ok) {
+            const webData = await webResp.json();
+            const webGroup = webData.results?.find((r) => r.type === 'player');
+            rawPlayers = webGroup?.contents || [];
+            if (rawPlayers.length === 0) {
+              for (const r of webData.results || []) {
+                const matching = (r.contents || []).filter(c => c.type === 'player' || c.uid?.includes('~a:'));
+                if (matching.length > 0) {
+                  rawPlayers = matching;
+                  break;
+                }
+              }
+            }
+          }
+        } catch (_) {}
+      }
+
       const players = rawPlayers.map((p) => {
         // Extract numeric ID from UID format "s:200~a:253802" or direct ID
         const uidMatch = p.uid ? p.uid.match(/~a:(\d+)/) : null;
