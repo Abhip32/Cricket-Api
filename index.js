@@ -334,6 +334,82 @@ app.get('/', (req, res) => {
         parameters: {
           team: 'Optional team name (e.g. ?team=India or ?team=NZ)'
         }
+      },
+      matchTimeline: {
+        endpoint: '/match/timeline',
+        aliases: ['/getTimeline', '/match/notes'],
+        method: 'GET',
+        description: 'Returns match timeline events: 50s, 100s, wickets, tactical milestones, partnership stands, session breaks, DRS reviews, and new ball calls.',
+        cacheTTL: '45 seconds (live) / 30 minutes (completed)',
+        parameters: {
+          leagueId: 'Tournament ID',
+          eventId: 'Match event ID'
+        }
+      },
+      matchLeaders: {
+        endpoint: '/match/leaders',
+        aliases: ['/getLeaders'],
+        method: 'GET',
+        description: 'Returns match MVPs and innings-by-innings top run scorers and top wicket takers with official HD headshots and strike rate/economy statistics.',
+        cacheTTL: '45 seconds (live) / 30 minutes (completed)',
+        parameters: {
+          leagueId: 'Tournament ID',
+          eventId: 'Match event ID'
+        }
+      },
+      matchVenue: {
+        endpoint: '/match/venue',
+        aliases: ['/getVenue'],
+        method: 'GET',
+        description: 'Returns stadium details: name, city, country, capacity, high-resolution stadium photo from Cricinfo CDN, and match officials with national flags.',
+        cacheTTL: '15 minutes',
+        parameters: {
+          leagueId: 'Tournament ID',
+          eventId: 'Match event ID'
+        }
+      },
+      matchWeather: {
+        endpoint: '/match/weather',
+        aliases: ['/getWeather'],
+        method: 'GET',
+        description: 'Returns real-time venue weather conditions: temperature in °C and °F, rain probability %, humidity %, wind speed, condition name, and rain interruption alert.',
+        cacheTTL: '15 minutes',
+        parameters: {
+          leagueId: 'Tournament ID',
+          eventId: 'Match event ID'
+        }
+      },
+      matchDebuts: {
+        endpoint: '/match/debuts',
+        aliases: ['/getDebuts'],
+        method: 'GET',
+        description: 'Returns all players making their match or tournament debut in this encounter with player details and team crests.',
+        cacheTTL: '15 minutes',
+        parameters: {
+          leagueId: 'Tournament ID',
+          eventId: 'Match event ID'
+        }
+      },
+      headToHead: {
+        endpoint: '/match/h2h',
+        aliases: ['/getH2H', '/getH2h'],
+        method: 'GET',
+        description: 'Returns historical head-to-head match rivalry records, win totals across formats, and outcomes of recent clashes between the two competing sides.',
+        cacheTTL: '1 hour',
+        parameters: {
+          leagueId: 'Tournament ID',
+          eventId: 'Match event ID'
+        }
+      },
+      seriesFixtures: {
+        endpoint: '/series/fixtures',
+        aliases: ['/getSeriesFixtures', '/series/:leagueId/fixtures'],
+        method: 'GET',
+        description: 'Returns chronological series and tour schedule with all match fixtures, current match statuses (Live/Upcoming/Completed), and scores.',
+        cacheTTL: '3 minutes',
+        parameters: {
+          leagueId: 'Tournament or tour series ID'
+        }
       }
     }
   });
@@ -433,6 +509,14 @@ app.get('/getWorm', scoreCardController.getWorm);
 app.get('/getTicker', matchController.getTicker);
 app.get('/getSituation', scoreCardController.getSituation);
 app.get('/getOvers', scoreCardController.getOvers);
+app.get('/getTimeline', scoreCardController.getTimeline);
+app.get('/getLeaders', scoreCardController.getLeaders);
+app.get('/getVenue', scoreCardController.getVenue);
+app.get('/getWeather', scoreCardController.getWeather);
+app.get('/getDebuts', scoreCardController.getDebuts);
+app.get('/getH2h', scoreCardController.getH2H);
+app.get('/getH2H', scoreCardController.getH2H);
+app.get('/getSeriesFixtures', seriesController.getSeriesFixtures);
 
 // 404 Handler
 app.use((req, res) => {

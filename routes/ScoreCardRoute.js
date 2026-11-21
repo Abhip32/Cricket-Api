@@ -39,4 +39,30 @@ router.get('/getSituation', scoreCardController.getSituation);
 router.get('/match/overs', scoreCardController.getOvers);
 router.get('/getOvers', scoreCardController.getOvers);
 
+// Match Timeline & Notes (50s, 100s, Partnerships, Sessions, DRS Reviews)
+router.get('/match/timeline', scoreCardController.getTimeline);
+router.get('/getTimeline', scoreCardController.getTimeline);
+router.get('/match/notes', scoreCardController.getTimeline);
+
+// Match Leaders & MVPs (Top batters, bowlers with headshots)
+router.get('/match/leaders', scoreCardController.getLeaders);
+router.get('/getLeaders', scoreCardController.getLeaders);
+
+// Stadium Profile & Photos
+router.get('/match/venue', scoreCardController.getVenue);
+router.get('/getVenue', scoreCardController.getVenue);
+
+// Live Ground Weather & Rain Probability
+router.get('/match/weather', scoreCardController.getWeather);
+router.get('/getWeather', scoreCardController.getWeather);
+
+// Match Debuts Tracker
+router.get('/match/debuts', scoreCardController.getDebuts);
+router.get('/getDebuts', scoreCardController.getDebuts);
+
+// Head-to-Head (H2H) Historical Rivalry
+router.get('/match/h2h', scoreCardController.getH2H);
+router.get('/getH2h', scoreCardController.getH2H);
+router.get('/getH2H', scoreCardController.getH2H);
+
 module.exports = router;

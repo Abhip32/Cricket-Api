@@ -16,4 +16,9 @@ router.get('/series/:leagueId/standings', seriesController.getStandings);
 router.get('/getSeriesTeams', seriesController.getSeriesTeams);
 router.get('/series/:leagueId/teams', seriesController.getSeriesTeams);
 
+// Series Fixtures & Tour Schedule: /series/fixtures, /series/:leagueId/fixtures, /getSeriesFixtures
+router.get('/series/fixtures', seriesController.getSeriesFixtures);
+router.get('/series/:leagueId/fixtures', seriesController.getSeriesFixtures);
+router.get('/getSeriesFixtures', seriesController.getSeriesFixtures);
+
 module.exports = router;

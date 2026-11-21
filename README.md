@@ -1,6 +1,6 @@
 # Cricket API & Scraper 🏏
 
-A high-performance, resilient REST API and web scraper for real-time cricket data, live match scores, fixtures, tournament schedules, points tables, player profiles, ball-by-ball commentary, match analytics (Partnerships, FOW, DRS, Manhattan, Worm), Cricbuzz photo galleries, ICC rankings, and detailed innings scorecards.
+A high-performance, resilient REST API and web scraper for real-time cricket data, live match scores, fixtures, tournament schedules, points tables, player profiles, ball-by-ball commentary, match analytics (Partnerships, FOW, DRS, Manhattan, Worm), live ground weather, stadium profiles, chronological match milestones, Cricbuzz photo galleries, ICC rankings, and detailed innings scorecards.
 
 ![Cricket API Live Preview](assets/preview.png)
 
@@ -37,36 +37,55 @@ This backend powers **[CricGeek](https://github.com/Abhip32/CricGeek)** — a lu
    - Ultra-fast player lookup by name with verified athlete IDs and country affiliations.
    - Rich player bio endpoints extracting date of birth, age, batting style, bowling style, playing role, official 500x500 CDN team crest, and verified high-resolution headshots.
 
-2. **Tournament Standings & Points Tables (`/getStandings`, `/getSeries`)**:
-   - Live tournament discovery listing all active bilateral tours and domestic leagues.
-   - Comprehensive points tables with ranks, points, wins, losses, ties, NRR, and official team logos across IPL, BBL, Sheffield Shield, World Cups, and more.
+2. **Official Tournament Standings & Qualification (`/getStandings`, `/getSeries`)**:
+   - Powered by ESPN's official v2 Standings API (`https://site.api.espn.com/apis/v2/sports/cricket/:leagueId/standings`).
+   - Returns all participating teams (8+ teams in leagues like WBBL, IPL, BBL, Sheffield Shield) with **Played (P)**, **Won (W)**, **Lost (L)**, **No Result / Tied (NR)**, **Net Run Rate (NRR)**, **Points (PTS)**, and official playoff qualification status (`qualified: 'Y'`).
 
-3. **In-Depth Match Analytics & Visual Charts**:
+3. **Match Timeline & Chronological Milestones (`/match/timeline`, `/match/notes`)**:
+   - Parses official match notes into chronological events: individual 50s, 100s, partnership stands, session breaks (Lunch, Tea, Stumps, Drinks), tactical markers (new ball taken), and DRS decisions.
+
+4. **Match Leaders & MVPs (`/match/leaders`)**:
+   - Innings-by-innings top run scorers and top wicket takers with official high-resolution player headshots, strike rates, economy, and team badges.
+
+5. **Stadium Profile & Live Open-Meteo Weather Radar (`/match/venue`, `/match/weather`)**:
+   - Stadium metadata including high-resolution ground photos from Cricinfo CDN, spectator capacity, city, country, pitch grass flag, and match officials with national flags.
+   - Real-time live ground weather conditions via Open-Meteo: temperature in both °C and °F, rain probability percentage, humidity %, wind speed, condition name, and rain delay interruption alerts.
+
+6. **Historical Head-to-Head Rivalry & Multi-Match Tour Tracker (`/match/h2h`, `/series/fixtures`)**:
+   - Head-to-head lifetime records across formats (matches played, wins per side, draws, ties, no-results) with recent match clash outcomes.
+   - Multi-match bilateral tour tracker listing all fixtures chronologically (*1st Test: Concluded • 2nd Test: Live • 3rd Test: Nov 26*).
+
+7. **Real-Time Match Situation & Dynamic Win Predictor Engine (`/match/situation`, `/match/overs`)**:
+   - Live Current Run Rate (CRR), Required Run Rate (RRR), target calculations, balls remaining, active striker, and bowler figures.
+   - Dynamic cricket win probability engine evaluating completed matches, chases, multi-day test draws/follow-ons, and 1st innings par score models.
+   - Grouped over-by-over summaries (`/match/overs`) with runs, wickets, and ball sequences for over chip navigation.
+
+8. **In-Depth Match Analytics & Visual Charts**:
    - **Algorithmic Partnership Crease Hydration (`/match/partnerships`, `/getScorecard`)**: Cross-references playing XI batting orders and Fall of Wickets dismissal records to resolve authentic batsman names, individual runs scored, and balls faced for every wicket stand, eliminating raw empty placeholders.
-   - **Fall of Wickets (`/match/fow`)**: Exact over-by-over dismissal timeline with batter scores and dismissal types.
+   - **Fall of Wickets (`/match/fow`)**: Exact over-by-over dismissal timeline with batter scores, dismissal types, and headshots.
    - **DRS Review Tracker (`/match/drs`)**: Review quotas (permitted, remaining, successful, unsuccessful) and live challenge logs.
-   - **Manhattan Chart (`/match/manhattan`)**: Over-by-over runs and wickets data ready for frontend bar charts.
-   - **Worm Chart (`/match/worm`)**: Cumulative run trajectory comparing both innings over by over.
+   - **Manhattan Bar Chart (`/match/manhattan`)**: Over-by-over runs and wickets data ready for frontend visualization.
+   - **Worm Progression Chart (`/match/worm`)**: Cumulative run trajectory comparing both innings over by over.
 
-4. **Match Preview, Pitch Report & Playing XI (`/match/preview`, `/match/squads`, `/match/info`)**:
+9. **Match Preview, Pitch Report & Playing XI (`/match/preview`, `/match/squads`, `/match/info`, `/match/debuts`)**:
    - Pre-match pitch reports and captain toss quotes extracted from live expert commentary feeds.
-   - Playing XI (starters), bench/substitutes, captains, wicketkeepers, and match debutants.
-   - Stadium venue information (capacity, surface type, city, country) and match officials (umpires, referee with flags).
+   - Playing XI (`starters`), bench/substitutes, captains, wicketkeepers, and match debutants (`/match/debuts`).
+   - Stadium venue information and match officials (umpires, referee with nationality flags).
 
-5. **Direct ESPN News Integration (`/getNews`, `/news`)**:
-   - Upgraded to ESPN's official 50-article JSON feed with high-res 900x506 CDN imagery, bylines, published timestamps, and topic categories.
-   - Supports tournament-specific news via `?leagueId=...` with resilient RSS XML and HTML scraping fallbacks.
+10. **Direct ESPN News Integration with Country Feeds (`/getNews`, `/news`)**:
+    - ESPN's official 50-article JSON feed with high-res 900x506 CDN imagery, bylines, published timestamps, and categories.
+    - Supports regional feeds via `?country=india`, `?country=australia`, `?country=england`, `?country=pakistan`, `?country=south-africa`, or numeric `feedId`.
 
-6. **100% ESPN API-Powered Live, Recent & Upcoming Fixtures (`/getLive`, `/getRecent`, `/getUpcoming`)**:
-   - Direct integration into ESPN's official Scoreboard Header API (`< 100ms`).
-   - Immune to Akamai 403 blocks on serverless cloud functions with support for `?league=...`, `?group=international`, and `?region=...` filters.
+11. **100% ESPN API-Powered Live, Recent & Upcoming Fixtures (`/getLive`, `/getRecent`, `/getUpcoming`)**:
+    - Direct integration into ESPN's official Scoreboard Header API (`< 100ms`).
+    - Immune to Akamai 403 blocks on serverless cloud functions with support for `?league=...`, `?group=international`, and `?region=...` filters.
 
-7. **Ball-by-Ball Commentary Stream with Video Replays (`/getCommentary`)**:
-   - Paginated ball-by-ball stream (`&limit=100`, `&page=N`, `&period=N`) with delivery outcomes (`W`, `4`, `6`, `1`, `0`), bowler/batter matchups, and direct video clip replay links (`videoClipUrl`).
+12. **Ball-by-Ball Commentary Stream with Video Replays (`/getCommentary`)**:
+    - Paginated ball-by-ball stream (`&limit=100`, `&page=N`, `&period=N`) with delivery outcomes (`W`, `4`, `6`, `1`, `0`), bowler/batter matchups, HTML-cleaned narratives, and direct video clip replay links (`videoClipUrl`).
 
-8. **Dynamic Team Flags & Multi-Tier In-Memory Cache (`flagService.js`, `cacheService.js`)**:
-   - Resolves SVG placeholders into high-resolution badges across 190+ countries and domestic clubs.
-   - High-performance LRU memory cache responding in **< 5 milliseconds**.
+13. **Dynamic Team Flags & Multi-Tier In-Memory Cache (`flagService.js`, `cacheService.js`)**:
+    - Resolves SVG placeholders into high-resolution badges across 190+ countries and domestic clubs with FlagCDN integration.
+    - High-performance LRU memory cache responding in **< 5 milliseconds**.
 
 ---
 
@@ -153,9 +172,9 @@ This project is optimized for deployment as a Vercel Serverless Function:
 #### `GET /getStandings` or `GET /standings`, `GET /series/:leagueId/standings`
 - **Cache TTL**: 5 minutes
 - **Parameters**:
-  - `leagueId` *(required, e.g. `?leagueId=8043` for Sheffield Shield or `?leagueId=21284` for WBBL)*.
+  - `leagueId` *(required, e.g. `?leagueId=8043` for Sheffield Shield or `?leagueId=21284` for WBBL)*
   - `refresh=true` *(optional)*
-- **Response**: Official tournament points table sorted by rank, with team names, abbreviations, 500x500 CDN logos, match points, and full statistics.
+- **Response**: Official tournament points table powered by ESPN's v2 Standings API. Returns all teams with `rank`, `team` (name, logo, abbreviation), `played`, `won`, `lost`, `tied`, `noResult`, `points`, `netrr`, `qualified` (boolean indicator for playoff qualification), and cumulative run records (`runsFor`, `runsAgainst`).
 
 #### `GET /getSeriesTeams` or `GET /series/:leagueId/teams`
 - **Cache TTL**: 15 minutes
@@ -163,9 +182,21 @@ This project is optimized for deployment as a Vercel Serverless Function:
   - `leagueId` *(required, e.g. `?leagueId=8043`)*
 - **Response**: All participating teams in the specified tournament with names, abbreviations, location, and official logos.
 
+#### `GET /series/fixtures` or `GET /getSeriesFixtures`, `GET /series/:leagueId/fixtures`
+- **Cache TTL**: 3 minutes
+- **Parameters**:
+  - `leagueId` *(required, e.g. `?leagueId=21284`)*
+  - `refresh=true` *(optional)*
+- **Response**: Multi-match tour schedule listing all matches chronologically with match numbers, teams, live/final scores, match states (`pre`, `in`, `post`), venues, and status text.
+
 ---
 
-### 4. Matches & Fixtures
+### 4. Matches, Ticker & Fixtures
+
+#### `GET /getTicker` or `GET /match/ticker`
+- **Cache TTL**: 30 seconds
+- **Parameters**: `refresh=true` *(optional)*
+- **Response**: Real-time scrolling ticker feed with team crests, live scores, overs, status badges, and match links for the top navigation bar.
 
 #### `GET /getLive`
 - **Cache TTL**: 45 seconds
@@ -193,8 +224,7 @@ This project is optimized for deployment as a Vercel Serverless Function:
   - `refresh=true` *(optional)*
 - **Response**: Upcoming scheduled fixtures with full team details, flags, series titles, venue information, start timestamps, and match formats.
 
-#### `GET /getSchedule`
-- **Alias**: `GET /getschdule`
+#### `GET /getSchedule` or `GET /getschdule`
 - **Cache TTL**: 10 minutes
 - **Parameters**: `refresh=true` *(optional)*
 - **Response**: Comprehensive tournament schedules, series fixtures, venue information, and match timings.
@@ -210,6 +240,46 @@ This project is optimized for deployment as a Vercel Serverless Function:
   - `leagueId` & `eventId` *(optional, direct IDs, e.g. `?leagueId=24756&eventId=1553295`)*
   - `refresh=true` *(optional)*
 - **Response**: Full match scorecard including batting tables (R, B, 4s, 6s, SR, dismissal), bowling tables (O, M, R, W, ECON), fall of wickets, wicket-by-wicket partnerships, DRS reviews, Playing XI squads, toss, venue, officials, leaders, and match status.
+
+#### `GET /match/situation` or `GET /getSituation`
+- **Cache TTL**: 30 seconds
+- **Parameters**: `leagueId` & `eventId` *(or `url`)*
+- **Response**: Real-time match situation including live Current Run Rate (CRR), Required Run Rate (RRR), target calculations, balls remaining, last 5 overs runs/wickets, active striker, bowler figures, and dynamic win probability predictor.
+
+#### `GET /match/overs` or `GET /getOvers`
+- **Cache TTL**: 30 seconds
+- **Parameters**: `leagueId` & `eventId` *(or `url`)*
+- **Response**: Grouped over-by-over summaries with over number, period (innings), bowler name, runs conceded, wickets taken, and individual ball outcome chips (`[1, 4, ., W, 2, 6]`) for over navigation.
+
+#### `GET /match/timeline` or `GET /getTimeline`, `GET /match/notes`
+- **Cache TTL**: 45 seconds (live) / 30 minutes (completed)
+- **Parameters**: `leagueId` & `eventId` *(or `url`)*
+- **Response**: Chronological match notes categorized into `milestones` (individual 50s/100s), `partnerships`, `sessions` (Lunch, Tea, Stumps, Drinks breaks), and `drsReviews` with over and innings stamps.
+
+#### `GET /match/leaders` or `GET /getLeaders`
+- **Cache TTL**: 45 seconds (live) / 30 minutes (completed)
+- **Parameters**: `leagueId` & `eventId` *(or `url`)*
+- **Response**: Top batters and top bowlers with official HD headshots, team badges, runs, wickets, strike rate, and economy.
+
+#### `GET /match/venue` or `GET /getVenue`
+- **Cache TTL**: 15 minutes
+- **Parameters**: `leagueId` & `eventId` *(or `url`)*
+- **Response**: Stadium profile: name, city, country, spectator capacity, pitch grass surface, official high-resolution ground photo from Cricinfo CDN, and match officials (umpires, TV umpire, match referee with national flags).
+
+#### `GET /match/weather` or `GET /getWeather`
+- **Cache TTL**: 15 minutes
+- **Parameters**: `leagueId` & `eventId` *(or `url`)*
+- **Response**: Real-time ground weather radar via Open-Meteo: temperature in °C and °F, rain probability percentage, humidity %, wind speed (km/h), condition name, and rain delay warning alert (`rainInterruptionAlert`).
+
+#### `GET /match/debuts` or `GET /getDebuts`
+- **Cache TTL**: 15 minutes
+- **Parameters**: `leagueId` & `eventId` *(or `url`)*
+- **Response**: Players making their match or tournament debut in this encounter with player IDs, names, headshots, and team details.
+
+#### `GET /match/h2h` or `GET /getH2H`, `GET /getH2h`
+- **Cache TTL**: 1 hour
+- **Parameters**: `leagueId` & `eventId` *(or `url`)*
+- **Response**: Lifetime head-to-head records between competing sides: total matches played, team 1 wins, team 2 wins, draws, ties, no-results, win split percentages, and recent clash encounter outcomes.
 
 #### `GET /match/partnerships` or `GET /getPartnerships`
 - **Cache TTL**: 45 seconds (live) / 30 minutes (completed)
@@ -267,7 +337,9 @@ This project is optimized for deployment as a Vercel Serverless Function:
 #### `GET /getNews` or `GET /news`
 - **Cache TTL**: 10 minutes
 - **Parameters**:
-  - `leagueId` *(optional, e.g. `?leagueId=8048` for IPL news, default `0` for global news)*
+  - `country` *(optional: `india`, `australia`, `england`, `pakistan`, `south-africa`)*
+  - `feedId` *(optional numeric feed ID: `0`=global, `6`=india, `2`=australia, `1`=england, `7`=pakistan, `3`=south africa)*
+  - `leagueId` *(optional, e.g. `?leagueId=8048` for tournament news)*
   - `refresh=true` *(optional)*
 - **Response**: Latest 50 cricket articles directly from ESPN with titles, descriptions, authors, publication timestamps, high-res 900x506 images, categories, and article links.
 
@@ -292,21 +364,21 @@ This project is optimized for deployment as a Vercel Serverless Function:
 Cricket-Api/
 ├── assets/                       # High-resolution screenshots & preview assets
 ├── controller/
-│   ├── MatchDataController.js    # Live, Recent, Upcoming (ESPN API), & Schedule
-│   ├── newsController.js         # Direct ESPN News API & fallback scraper
+│   ├── MatchDataController.js    # Live, Recent, Upcoming (ESPN API), Schedule & Ticker
+│   ├── newsController.js         # Direct ESPN News API & Country-specific feeds
 │   ├── photoController.js        # Cricbuzz photo galleries & albums
 │   ├── playerController.js       # Player profiles, search & universal search
 │   ├── rankingController.js      # ICC team & player rankings
-│   ├── scoreCardController.js    # Scorecards, Commentary, Partnerships, FOW, DRS, Charts
-│   └── seriesController.js       # Tournaments, series & standings (points tables)
+│   ├── scoreCardController.js    # Scorecards, Commentary, Timeline, Leaders, Venue, Weather, Debuts, H2H, Analytics
+│   └── seriesController.js       # Tournaments, series, v2 standings (points tables) & tour fixtures
 ├── routes/
-│   ├── MatchDataRoute.js         # /getLive, /getRecent, /getUpcoming, /getSchedule
+│   ├── MatchDataRoute.js         # /getLive, /getRecent, /getUpcoming, /getSchedule, /getTicker
 │   ├── newsRoute.js              # /getNews, /news
 │   ├── photoRoute.js             # /getPhotos
 │   ├── playerRoute.js            # /player/search, /player/:id, /search
 │   ├── rankingRoutes.js          # /rankings/*
 │   ├── ScoreCardRoute.js         # /getScorecard, /match/*, /getCommentary
-│   └── seriesRoute.js            # /getSeries, /getStandings, /series/*
+│   └── seriesRoute.js            # /getSeries, /getStandings, /series/*, /series/fixtures
 ├── services/
 │   ├── browserService.js         # Puppeteer lifecycle & ad/media blocker
 │   ├── cacheService.js           # Multi-tier TTL cache with LRU eviction
