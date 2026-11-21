@@ -64,20 +64,30 @@ async function resolveMatchIds(req) {
 }
 
 async function fetchEspnSummaryRaw(leagueId, eventId) {
-  try {
-    const url = `https://site.web.api.espn.com/apis/site/v2/sports/cricket/${leagueId}/summary?event=${eventId}`;
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 4500);
-    const res = await fetch(url, {
-      signal: controller.signal,
-      headers: { 'User-Agent': 'Mozilla/5.0' }
-    });
-    clearTimeout(timer);
-    if (!res.ok) return null;
-    return await res.json();
-  } catch (e) {
-    return null;
+  const hosts = [
+    `https://site.api.espn.com/apis/site/v2/sports/cricket/${leagueId}/summary?event=${eventId}`,
+    `https://site.web.api.espn.com/apis/site/v2/sports/cricket/${leagueId}/summary?event=${eventId}`
+  ];
+
+  for (const url of hosts) {
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 6500);
+      const res = await fetch(url, {
+        signal: controller.signal,
+        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
+      });
+      clearTimeout(timer);
+      if (res.ok) {
+        const json = await res.json();
+        if (json && json.header) return json;
+      }
+    } catch (e) {
+      // try next host
+    }
   }
+
+  return null;
 }
 
 async function fetchEspnCommentary(leagueId, eventId, limit = 100, page = 1, period = null) {
@@ -1663,58 +1673,95 @@ const scoreCardController = {
       const competition = summary?.header?.competitions?.[0];
       const competitors = competition?.competitors || [];
 
-      // Extract batting & bowling teams
+      // Competitors: comp1 = Team 1 (Scorecard top/left), comp2 = Team 2 (Scorecard bottom/right)
+      const comp1 = competitors[0] || null;
+      const comp2 = competitors[1] || null;
+
+      const team1Name = comp1?.team?.displayName || comp1?.team?.name || 'Team 1';
+      const team2Name = comp2?.team?.displayName || comp2?.team?.name || 'Team 2';
+      const team1Abbr = comp1?.team?.abbreviation || team1Name.slice(0, 4).toUpperCase();
+      const team2Abbr = comp2?.team?.abbreviation || team2Name.slice(0, 4).toUpperCase();
+
+      const battingTeamId = String(competition?.status?.battingTeamId || '');
+      const isCompleted = Boolean(competition?.status?.type?.completed || competition?.status?.type?.state === 'post');
+      const isLive = competition?.status?.type?.state === 'in' || (!isCompleted && competition?.status?.type?.id !== '0');
+      const statusText = competition?.status?.summary || competition?.status?.type?.detail || competition?.statusText || '';
+
+      // Identify active linescore and batting team
       let battingTeam = null;
       let bowlingTeam = null;
       let target = null;
-      let statusText = competition?.status?.type?.detail || competition?.statusText || '';
-      const isLive = competition?.status?.type?.state === 'in' || !competition?.status?.type?.completed;
 
       competitors.forEach((c) => {
         const teamName = c.team?.displayName || c.team?.name || '';
         const flag = c.team?.logos?.[0]?.href || flagService.getFlag(teamName);
-        const linescore = c.linescores?.[c.linescores.length - 1];
+        
+        // Find current linescore: active period > isCurrent === 1 > last isBatting > fallback to last
+        const activePeriod = competition?.status?.period;
+        const linescore =
+          (activePeriod && (c.linescores || []).find((l) => l.period === activePeriod)) ||
+          (c.linescores || []).find((l) => l.isCurrent === 1) ||
+          (c.linescores || []).slice().reverse().find((l) => l.isBatting === true) ||
+          c.linescores?.[c.linescores.length - 1];
+
+        // Detect target from linescore or score string (e.g. "target 223")
+        if (linescore?.target && Number(linescore.target) > 0) {
+          target = Number(linescore.target);
+        } else {
+          const scoreTargetMatch = (c.score || '').match(/target\s+(\d+)/i);
+          if (scoreTargetMatch) {
+            target = parseInt(scoreTargetMatch[1], 10);
+          }
+        }
+
+        const isCurrentlyBatting = battingTeamId
+          ? String(c.team?.id) === battingTeamId
+          : Boolean(linescore?.isBatting || c.isBatting);
 
         const tData = {
           id: c.team?.id,
           name: teamName,
-          abbreviation: c.team?.abbreviation || teamName.slice(0, 3).toUpperCase(),
+          abbreviation: c.team?.abbreviation || teamName.slice(0, 4).toUpperCase(),
           score: c.score || '',
           flag,
           overs: linescore?.overs || 0,
           runs: linescore?.runs || 0,
           wickets: linescore?.wickets || 0,
-          isBatting: Boolean(linescore?.isBatting || c.isBatting),
-          target: linescore?.target || 0
+          isBatting: isCurrentlyBatting,
+          target: target || 0
         };
 
-        if (linescore?.target) target = linescore.target;
-
-        if (tData.isBatting) {
+        if (isCurrentlyBatting) {
           battingTeam = tData;
         } else {
           bowlingTeam = tData;
         }
       });
 
-      if (!battingTeam && competitors[0]) {
+      if (!battingTeam && comp1) {
         battingTeam = {
-          name: competitors[0].team?.displayName || '',
-          score: competitors[0].score || '',
-          flag: flagService.getFlag(competitors[0].team?.displayName || ''),
+          id: comp1.team?.id,
+          name: team1Name,
+          abbreviation: team1Abbr,
+          score: comp1.score || '',
+          flag: comp1.team?.logos?.[0]?.href || flagService.getFlag(team1Name),
           overs: 0,
           runs: 0,
-          wickets: 0
+          wickets: 0,
+          isBatting: true
         };
       }
-      if (!bowlingTeam && competitors[1]) {
+      if (!bowlingTeam && comp2) {
         bowlingTeam = {
-          name: competitors[1].team?.displayName || '',
-          score: competitors[1].score || '',
-          flag: flagService.getFlag(competitors[1].team?.displayName || ''),
+          id: comp2.team?.id,
+          name: team2Name,
+          abbreviation: team2Abbr,
+          score: comp2.score || '',
+          flag: comp2.team?.logos?.[0]?.href || flagService.getFlag(team2Name),
           overs: 0,
           runs: 0,
-          wickets: 0
+          wickets: 0,
+          isBatting: false
         };
       }
 
@@ -1724,47 +1771,240 @@ const scoreCardController = {
         const fullOvers = Math.floor(battingTeam.overs);
         const balls = Math.round((battingTeam.overs - fullOvers) * 10);
         const totalBalls = fullOvers * 6 + balls;
-        if (totalBalls > 0 && battingTeam.runs) {
+        if (totalBalls > 0 && battingTeam.runs != null) {
           currentRunRate = parseFloat(((battingTeam.runs / totalBalls) * 6).toFixed(2));
         }
       }
 
-      // RRR calculation
+      // RRR calculation & Target Math
       let requiredRunRate = null;
       let runsNeeded = null;
       let ballsRemaining = null;
 
-      if (target && battingTeam?.runs != null) {
+      // Extract runsNeeded from status summary if present (e.g. "require 148 runs")
+      const reqMatch = statusText.match(/require[s]?\s+(\d+)\s+runs/i);
+      if (reqMatch) {
+        runsNeeded = parseInt(reqMatch[1], 10);
+      } else if (target && battingTeam?.runs != null) {
         runsNeeded = Math.max(0, target - battingTeam.runs);
-        const formatName = (summary?.header?.league?.name || '').toUpperCase();
-        let totalFormatBalls = 120;
-        if (formatName.includes('ODI') || formatName.includes('ONE-DAY')) totalFormatBalls = 300;
-        else if (formatName.includes('TEST') || formatName.includes('SHIELD')) totalFormatBalls = 0;
+      }
 
-        if (totalFormatBalls > 0 && battingTeam.overs) {
-          const fullOvers = Math.floor(battingTeam.overs);
-          const balls = Math.round((battingTeam.overs - fullOvers) * 10);
-          const bowledBalls = fullOvers * 6 + balls;
-          ballsRemaining = Math.max(0, totalFormatBalls - bowledBalls);
-          if (ballsRemaining > 0) {
-            requiredRunRate = parseFloat(((runsNeeded / ballsRemaining) * 6).toFixed(2));
-          }
+      const formatName = (summary?.header?.league?.name || '').toUpperCase();
+      const isMultiDay =
+        formatName.includes('TEST') ||
+        formatName.includes('SHIELD') ||
+        formatName.includes('TROPHY') ||
+        formatName.includes('MAJOR LEAGUE') ||
+        formatName.includes('FIRST-CLASS') ||
+        formatName.includes('CHAMPIONSHIP') ||
+        formatName.includes('3-DAY') ||
+        formatName.includes('4-DAY');
+      const isT20 =
+        formatName.includes('T20') ||
+        formatName.includes('TWENTY20') ||
+        formatName.includes('BASH') ||
+        formatName.includes('PREMIER LEAGUE') ||
+        formatName.includes('LEAGUE T20');
+
+      if (target && runsNeeded !== null && !isMultiDay && battingTeam?.overs != null) {
+        const totalFormatBalls = isT20 ? 120 : 300;
+        const fullOvers = Math.floor(battingTeam.overs);
+        const balls = Math.round((battingTeam.overs - fullOvers) * 10);
+        const bowledBalls = fullOvers * 6 + balls;
+        ballsRemaining = Math.max(0, totalFormatBalls - bowledBalls);
+        if (ballsRemaining > 0) {
+          requiredRunRate = parseFloat(((runsNeeded / ballsRemaining) * 6).toFixed(2));
         }
       }
 
-      // Win probability estimate
-      let teamAWinProb = 50;
-      let teamBWinProb = 50;
+      // Dynamic Cricket Win Probability Engine
+      let team1WinProb = 50;
+      let team2WinProb = 50;
 
-      if (summary?.predictor?.homeTeam?.gameProjection) {
-        teamAWinProb = parseFloat(summary.predictor.homeTeam.gameProjection);
-        teamBWinProb = parseFloat((100 - teamAWinProb).toFixed(1));
-      } else if (requiredRunRate !== null && currentRunRate > 0) {
-        const wicketsInHand = 10 - (battingTeam?.wickets || 0);
-        let battingChance = 50 + (currentRunRate - requiredRunRate) * 7 + (wicketsInHand - 5) * 4;
-        battingChance = Math.min(98, Math.max(2, Math.round(battingChance)));
-        teamAWinProb = battingChance;
-        teamBWinProb = 100 - battingChance;
+      // 1. COMPLETED MATCH
+      if (isCompleted) {
+        const resultLower = (statusText + ' ' + (competition?.statusText || '')).toLowerCase();
+        if (
+          comp1?.winner === true ||
+          resultLower.includes(team1Name.toLowerCase() + ' won') ||
+          resultLower.includes(team1Abbr.toLowerCase() + ' won')
+        ) {
+          team1WinProb = 100;
+          team2WinProb = 0;
+        } else if (
+          comp2?.winner === true ||
+          resultLower.includes(team2Name.toLowerCase() + ' won') ||
+          resultLower.includes(team2Abbr.toLowerCase() + ' won')
+        ) {
+          team1WinProb = 0;
+          team2WinProb = 100;
+        } else if (resultLower.includes('draw') || resultLower.includes('tie') || resultLower.includes('no result')) {
+          team1WinProb = 50;
+          team2WinProb = 50;
+        } else {
+          // Fallback to scores if winner flag not explicitly marked
+          team1WinProb = (comp1?.score || 0) >= (comp2?.score || 0) ? 99 : 1;
+          team2WinProb = 100 - team1WinProb;
+        }
+      }
+      // 2. OFFICIAL ESPN PREDICTOR / PROJECTION (if ESPN provides it)
+      else if (summary?.predictor?.homeTeam?.gameProjection) {
+        const homeProb = parseFloat(summary.predictor.homeTeam.gameProjection);
+        const awayProb = parseFloat((100 - homeProb).toFixed(1));
+        const homeId = String(summary.predictor.homeTeam.id || '');
+        if (String(comp1?.team?.id) === homeId) {
+          team1WinProb = homeProb;
+          team2WinProb = awayProb;
+        } else {
+          team1WinProb = awayProb;
+          team2WinProb = homeProb;
+        }
+      }
+      // 3. DYNAMIC IN-PLAY SITUATION MODEL
+      else {
+        const activePeriod = competition?.status?.period || 1;
+        const team1IsBatting = battingTeamId
+          ? String(comp1?.team?.id) === battingTeamId
+          : Boolean(battingTeam?.name === team1Name);
+
+        // CASE A: 2nd Innings Target Chase (or 4th Innings in Multi-Day)
+        if (target && runsNeeded !== null) {
+          const chasingTeamIsTeam1 = team1IsBatting;
+          const chasingRuns = battingTeam?.runs || 0;
+          const chasingWickets = battingTeam?.wickets || 0;
+          const chasingOvers = battingTeam?.overs || 0;
+          const wicketsInHand = Math.max(0, 10 - chasingWickets);
+
+          let chasingChance = 50;
+
+          if (runsNeeded <= 0) {
+            chasingChance = 99;
+          } else if (wicketsInHand === 0) {
+            chasingChance = 1;
+          } else if (!isMultiDay) {
+            const totalBalls = isT20 ? 120 : 300;
+            const fullOvers = Math.floor(chasingOvers);
+            const balls = Math.round((chasingOvers - fullOvers) * 10);
+            const bowledBalls = fullOvers * 6 + balls;
+            const remBalls = Math.max(1, totalBalls - bowledBalls);
+            const rrr = (runsNeeded / remBalls) * 6;
+            const crr = currentRunRate > 0 ? currentRunRate : (isT20 ? 8 : 5.5);
+
+            // Pressure delta
+            const rrrDiff = rrr - crr;
+            chasingChance = 50 - rrrDiff * 6.5 + (wicketsInHand - 5) * 5.5;
+
+            // Late overs volatility
+            if (remBalls <= 36) {
+              if (rrr > 14) chasingChance -= (rrr - 14) * 6;
+              if (rrr < 6 && wicketsInHand >= 4) chasingChance += (6 - rrr) * 5;
+            }
+          } else {
+            // Multi-day 4th innings target chase
+            const runsPerWkt = runsNeeded / Math.max(1, wicketsInHand);
+            if (runsPerWkt < 20) chasingChance = 78 + (20 - runsPerWkt);
+            else if (runsPerWkt < 35) chasingChance = 60 + (35 - runsPerWkt) * 0.8;
+            else if (runsPerWkt < 50) chasingChance = 45 - (runsPerWkt - 35) * 0.6;
+            else chasingChance = Math.max(4, 25 - (runsPerWkt - 50) * 0.5);
+          }
+
+          chasingChance = Math.min(98, Math.max(2, Math.round(chasingChance)));
+
+          if (chasingTeamIsTeam1) {
+            team1WinProb = chasingChance;
+            team2WinProb = 100 - chasingChance;
+          } else {
+            team2WinProb = chasingChance;
+            team1WinProb = 100 - chasingChance;
+          }
+        }
+        // CASE B: Multi-Day Matches (Innings 1, 2, or 3)
+        else if (isMultiDay) {
+          const battingComp = team1IsBatting ? comp1 : comp2;
+          const bowlingComp = team1IsBatting ? comp2 : comp1;
+
+          if (activePeriod === 2) {
+            // Period 2: Batting team is in 1st innings responding to Bowling team's 1st innings total
+            const bowling1st = bowlingComp?.linescores?.find((l) => l.period === 1);
+            const battingLs =
+              battingComp?.linescores?.find((l) => l.period === 2) ||
+              battingComp?.linescores?.[battingComp.linescores.length - 1];
+
+            const firstInnTarget = Number(bowling1st?.runs) || 300;
+            const curRuns = Number(battingLs?.runs) || 0;
+            const curWkts = Number(battingLs?.wickets) || 0;
+            const trail = firstInnTarget - curRuns;
+
+            let bowlingAdvantage = 50 + (trail / 25) * 2.8 + (curWkts - 5) * 3.5;
+            bowlingAdvantage = Math.min(88, Math.max(12, Math.round(bowlingAdvantage)));
+            const battingAdvantage = 100 - bowlingAdvantage;
+
+            team1WinProb = team1IsBatting ? battingAdvantage : bowlingAdvantage;
+            team2WinProb = team1IsBatting ? bowlingAdvantage : battingAdvantage;
+          } else if (activePeriod === 3) {
+            // Period 3: 2nd innings with lead
+            const t1Ls = comp1?.linescores || [];
+            const t2Ls = comp2?.linescores || [];
+            let t1Runs = 0, t2Runs = 0;
+            t1Ls.forEach((l) => { t1Runs += Number(l.runs) || 0; });
+            t2Ls.forEach((l) => { t2Runs += Number(l.runs) || 0; });
+            const lead = t1Runs - t2Runs;
+            let prob = 50 + (lead / 20) * 2;
+            prob = Math.min(90, Math.max(10, Math.round(prob)));
+            team1WinProb = prob;
+            team2WinProb = 100 - prob;
+          } else {
+            // Period 1: Batting team setting 1st innings tone
+            const batLs = battingComp?.linescores?.find((l) => l.period === 1);
+            const runs = Number(batLs?.runs) || 0;
+            const wkts = Number(batLs?.wickets) || 0;
+            const ovs = Number(batLs?.overs) || 0;
+            if (ovs < 5) {
+              team1WinProb = 50;
+              team2WinProb = 50;
+            } else {
+              const parScore = 320;
+              const projected = runs + Math.max(0, 10 - wkts) * 32;
+              let batProb = 50 + ((projected - parScore) / 25) * 3;
+              batProb = Math.min(85, Math.max(15, Math.round(batProb)));
+              team1WinProb = team1IsBatting ? batProb : 100 - batProb;
+              team2WinProb = 100 - team1WinProb;
+            }
+          }
+        }
+        // CASE C: 1st Innings of Limited Overs (T20 / ODI)
+        else {
+          const parScore = isT20 ? 165 : 280;
+          const parRR = isT20 ? 8.25 : 5.6;
+          const totalBalls = isT20 ? 120 : 300;
+
+          const battingComp = team1IsBatting ? comp1 : comp2;
+          const lastLs = battingComp?.linescores?.[battingComp.linescores.length - 1] || {};
+          const innRuns = Number(lastLs.runs) || 0;
+          const innWkts = Number(lastLs.wickets) || 0;
+          const innOvs = Number(lastLs.overs) || 0;
+
+          const fullOvers = Math.floor(innOvs);
+          const balls = Math.round((innOvs - fullOvers) * 10);
+          const ballsBowled = fullOvers * 6 + balls;
+          const remBalls = Math.max(0, totalBalls - ballsBowled);
+          const wktsInHand = Math.max(0, 10 - innWkts);
+
+          if (ballsBowled < 6) {
+            team1WinProb = 50;
+            team2WinProb = 50;
+          } else {
+            const projectedAddition = (remBalls / 6) * (parRR * Math.pow(Math.max(0.1, wktsInHand / 10), 0.45));
+            const projectedTotal = innRuns + projectedAddition;
+            const diffFromPar = projectedTotal - parScore;
+
+            let batProb = 50 + (diffFromPar / (isT20 ? 10 : 16)) * 6;
+            batProb = Math.min(92, Math.max(8, Math.round(batProb)));
+
+            team1WinProb = team1IsBatting ? batProb : 100 - batProb;
+            team2WinProb = 100 - team1WinProb;
+          }
+        }
       }
 
       // Last 5 overs runs from commentary
@@ -1803,10 +2043,12 @@ const scoreCardController = {
         currentRunRate,
         requiredRunRate,
         winProbability: {
-          teamA: battingTeam?.name || 'Batting Team',
-          teamAPercentage: teamAWinProb,
-          teamB: bowlingTeam?.name || 'Bowling Team',
-          teamBPercentage: teamBWinProb
+          teamA: team1Name,
+          teamAAbbreviation: team1Abbr,
+          teamAPercentage: team1WinProb,
+          teamB: team2Name,
+          teamBAbbreviation: team2Abbr,
+          teamBPercentage: team2WinProb
         },
         striker,
         currentBowler,
