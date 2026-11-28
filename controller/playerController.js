@@ -60,7 +60,13 @@ const playerController = {
       if (rawPlayers.length === 0) {
         try {
           const webUrl = `https://site.web.api.espn.com/apis/search/v2?query=${encodeURIComponent(trimmedQuery)}&limit=${limit}`;
-          const webResp = await fetch(webUrl, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+          const webController = new AbortController();
+          const webTimer = setTimeout(() => webController.abort(), 4500);
+          const webResp = await fetch(webUrl, {
+            signal: webController.signal,
+            headers: { 'User-Agent': 'Mozilla/5.0' }
+          });
+          clearTimeout(webTimer);
           if (webResp.ok) {
             const webData = await webResp.json();
             const webGroup = webData.results?.find((r) => r.type === 'player');
